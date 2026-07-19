@@ -1,7 +1,5 @@
 
 
-import * as SecureStore from 'expo-secure-store'
-
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000'
 
 // ─────────────────────────────────────────
@@ -34,7 +32,6 @@ async function request<T>(
 // ─────────────────────────────────────────
 export const FilesAPI = {
 
-  // Get presigned URL to upload directly to S3
   presign: (params: {
     s3_key:       string
     content_type: string
@@ -45,7 +42,6 @@ export const FilesAPI = {
       body:   JSON.stringify(params),
     }),
 
-  // Parse uploaded file → extract text → save to Supabase
   parse: (params: {
     s3_key:    string
     user_id:   string
@@ -61,9 +57,33 @@ export const FilesAPI = {
       body:   JSON.stringify(params),
     }),
 
-  // Delete file from S3
   delete: (params: { s3_key: string; user_id: string }) =>
     request<{ success: boolean; s3_key: string }>('/files/delete', {
+      method: 'POST',
+      body:   JSON.stringify(params),
+    }),
+
+  // ── Smart Import ──
+  analyzeStructure: (params: {
+    course_name: string
+    files: {
+      file_name:   string
+      parsed_text: string
+      note_id:     string
+    }[]
+  }) =>
+    request<{
+      structure: {
+        sections: {
+          title:   string
+          lessons: {
+            title:       string
+            file_index:  number
+            sub_lessons: { title: string }[]
+          }[]
+        }[]
+      }
+    }>('/files/analyze-structure', {
       method: 'POST',
       body:   JSON.stringify(params),
     }),
@@ -74,7 +94,6 @@ export const FilesAPI = {
 // ─────────────────────────────────────────
 export const QuizAPI = {
 
-  // Generate questions from a note
   generate: (params: {
     note_id:        string
     user_id:        string
@@ -91,7 +110,6 @@ export const QuizAPI = {
       body:   JSON.stringify(params),
     }),
 
-  // Fetch existing questions for a note
   fetch: (note_id: string) =>
     request<{
       note_id:   string
@@ -99,7 +117,6 @@ export const QuizAPI = {
       count:     number
     }>(`/quiz/${note_id}`),
 
-  // Regenerate questions (deletes old ones first)
   regenerate: (params: {
     note_id:        string
     user_id:        string
@@ -140,13 +157,13 @@ export const NotificationsAPI = {
 export const ExamsAPI = {
 
   create: (params: {
-    user_id:            string
-    course_id:          string
-    title:              string
-    exam_type:          string
-    exam_date:          string
-    location?:          string
-    notes?:             string
+    user_id:             string
+    course_id:           string
+    title:               string
+    exam_type:           string
+    exam_date:           string
+    location?:           string
+    notes?:              string
     remind_days_before?: number
   }) =>
     request<any>('/notifications/exams', {
@@ -190,4 +207,24 @@ export interface QuizQuestion {
     option_index: number
     option_text:  string
   }[]
+}
+
+// ── Smart Import Types ──
+export interface StructureSuggestion {
+  sections: SectionSuggestion[]
+}
+
+export interface SectionSuggestion {
+  title:   string
+  lessons: LessonSuggestion[]
+}
+
+export interface LessonSuggestion {
+  title:       string
+  file_index:  number
+  sub_lessons: SubLessonSuggestion[]
+}
+
+export interface SubLessonSuggestion {
+  title: string
 }
