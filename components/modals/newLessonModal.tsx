@@ -118,7 +118,6 @@ import {
                       placeholderTextColor={Colors.textMuted}
                       value={name}
                       onChangeText={setName}
-                      autoFocus
                     />
                     <Text style={styles.hint}>
                       Give your lesson a descriptive name that reflects the topic.

@@ -145,7 +145,6 @@ import {
                         placeholderTextColor={Colors.textMuted}
                         value={name}
                         onChangeText={setName}
-                        autoFocus
                       />
                     </View>
   
@@ -165,7 +164,7 @@ import {
   
                     <View style={styles.field}>
                       <Text style={styles.label}>
-                        Semester{' '}
+                        Group by{' '}
                         <Text style={styles.optional}>(Optional)</Text>
                       </Text>
                       <TextInput
@@ -298,7 +297,7 @@ import {
       backgroundColor:      Colors.card,
       borderTopLeftRadius:  Radius.xxl,
       borderTopRightRadius: Radius.xxl,
-      paddingBottom:        Spacing.xxxl,
+      paddingBottom:        Spacing.lg,
       maxHeight:            '92%',
     },
     handle: {
@@ -361,7 +360,7 @@ import {
     input: {
       backgroundColor:   Colors.cardElevated,
       borderWidth:       1,
-      borderColor:       Colors.primary,
+      borderColor:       Colors.border,
       borderRadius:      Radius.md,
       paddingVertical:   Spacing.md,
       paddingHorizontal: Spacing.md,

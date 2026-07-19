@@ -134,7 +134,7 @@ export const deleteNote = async (
 // ─────────────────────────────────────────
 // CONTENT TYPE MAP
 // ─────────────────────────────────────────
-const getContentType = (fileType: FileType): string => {
+export const getContentType = (fileType: FileType): string => {
   const map: Record<FileType, string> = {
     pdf:  'application/pdf',
     docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

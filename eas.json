@@ -1,0 +1,41 @@
+{
+    "cli": {
+      "version": ">= 10.0.0"
+    },
+    "build": {
+      "development": {
+        "developmentClient": true,
+        "distribution": "internal",
+        "ios": {
+          "simulator": false
+        },
+        "env": {
+          "EXPO_PUBLIC_API_URL": "https://memo-backend-production-c984.up.railway.app",
+          "EXPO_PUBLIC_SUPABASE_URL": "https://nmjwnoooxdmkozrgpwrg.supabase.co"
+        }
+      },
+      "preview": {
+        "distribution": "internal",
+        "env": {
+          "EXPO_PUBLIC_API_URL": "https://memo-backend-production-c984.up.railway.app",
+          "EXPO_PUBLIC_SUPABASE_URL": "https://nmjwnoooxdmkozrgpwrg.supabase.co"
+        }
+      },
+      "production": {
+        "autoIncrement": true,
+        "env": {
+          "EXPO_PUBLIC_API_URL": "https://memo-backend-production-c984.up.railway.app",
+          "EXPO_PUBLIC_SUPABASE_URL": "https://nmjwnoooxdmkozrgpwrg.supabase.co"
+        }
+      }
+    },
+    "submit": {
+      "production": {
+        "ios": {
+          "appleId": "housencamara18@gmail.com",
+        "ascAppId": "6759538536",
+        "appleTeamId": "JJP43AVJDG"
+        }
+      }
+    }
+  }

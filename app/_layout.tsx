@@ -1,5 +1,6 @@
 
-
+import 'react-native-gesture-handler'
+import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { useEffect, useState } from 'react'
 import { Stack, useRouter, useSegments } from 'expo-router'
 import { Session } from '@supabase/supabase-js'
@@ -52,7 +53,7 @@ export default function RootLayout() {
   )
 
   return (
-    <>
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="light" backgroundColor={Colors.background} />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)"          />
@@ -60,8 +61,9 @@ export default function RootLayout() {
         <Stack.Screen name="course/[id]"     />
         <Stack.Screen name="lesson/[id]"     />
         <Stack.Screen name="sublesson/[id]"  />
-        <Stack.Screen name="results"         />
+        <Stack.Screen name="results"  options={{ headerShown: false }} />
+        <Stack.Screen name="study/[id]" />
       </Stack>
-    </>
+    </GestureHandlerRootView>
   )
 }

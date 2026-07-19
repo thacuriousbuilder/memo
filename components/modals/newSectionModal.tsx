@@ -2,19 +2,22 @@
 
 import {
     View, Text, TextInput, TouchableOpacity,
-    StyleSheet, Modal, Alert, KeyboardAvoidingView, Platform
+    StyleSheet, Modal, Alert,
+    KeyboardAvoidingView, Platform
   } from 'react-native'
   import { useState } from 'react'
   import { Ionicons } from '@expo/vector-icons'
   import { Colors, Spacing, Radius, Typography } from '@/constants/theme'
   
   interface Props {
-    visible:   boolean
-    onClose:   () => void
-    onCreate:  (name: string) => void
+    visible:  boolean
+    onClose:  () => void
+    onCreate: (name: string) => Promise<void>
   }
   
-  export default function NewSubLessonModal({ visible, onClose, onCreate }: Props) {
+  export default function NewSectionModal({
+    visible, onClose, onCreate
+  }: Props) {
     const [name,    setName]    = useState('')
     const [loading, setLoading] = useState(false)
   
@@ -24,12 +27,12 @@ import {
   
     const handleCreate = async () => {
       if (!name.trim()) {
-        Alert.alert('Required', 'Please enter a sub-lesson name.')
+        Alert.alert('Required', 'Please enter a section name.')
         return
       }
       try {
         setLoading(true)
-        await onCreate(name)
+        await onCreate(name.trim())
         reset()
         onClose()
       } catch (err: any) {
@@ -60,24 +63,32 @@ import {
   
               {/* Header */}
               <View style={styles.header}>
-                <Text style={styles.headerTitle}>New Sub-lesson</Text>
-                <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
-                  <Ionicons name="close" size={20} color={Colors.textSecondary} />
+                <Text style={styles.headerTitle}>New Section</Text>
+                <TouchableOpacity
+                  style={styles.closeButton}
+                  onPress={handleClose}
+                >
+                  <Ionicons
+                    name="close"
+                    size={20}
+                    color={Colors.textSecondary}
+                  />
                 </TouchableOpacity>
               </View>
   
+              {/* Content */}
               <View style={styles.content}>
-                <Text style={styles.label}>Sub-lesson Name</Text>
+                <Text style={styles.label}>Section Name</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="e.g., Confidentiality, Integrity"
+                  placeholder="e.g., Fall 2024, Unit 1, Fundamentals"
                   placeholderTextColor={Colors.textMuted}
                   value={name}
                   onChangeText={setName}
                 />
                 <Text style={styles.hint}>
-                  Sub-lessons help break down complex topics into smaller,
-                  focused study sessions.
+                  Sections group related lessons together.
+                  You can use semester names, units, or topic areas.
                 </Text>
               </View>
   
@@ -90,12 +101,15 @@ import {
                   <Text style={styles.cancelText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.primaryButton, loading && { opacity: 0.6 }]}
+                  style={[
+                    styles.primaryButton,
+                    loading && { opacity: 0.6 }
+                  ]}
                   onPress={handleCreate}
                   disabled={loading}
                 >
                   <Text style={styles.primaryText}>
-                    {loading ? 'Creating...' : 'Create Sub-lesson'}
+                    {loading ? 'Creating...' : 'Create Section'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -171,8 +185,9 @@ import {
       color:             Colors.textPrimary,
     },
     hint: {
-      fontSize: Typography.xs,
-      color:    Colors.textSecondary,
+      fontSize:   Typography.xs,
+      color:      Colors.textSecondary,
+      lineHeight: Typography.xs * 1.6,
     },
     footer: {
       flexDirection:     'row',
