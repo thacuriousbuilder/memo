@@ -11,9 +11,12 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
 import { useSession }    from '@/hooks/useSession'
 import UploadProgress    from '@/components/uploadProgress'
+import UploadSourceSheet from '@/components/modals/uploadSourceSheet'
+import DriveFilePicker   from '@/components/modals/driveFilePicker'
 import {
   useSubLesson,
   uploadSubLessonNote,
+  uploadSubLessonNoteFromAsset, 
   deleteSubLessonNote,
   SubLessonNote,
   UploadStage,
@@ -42,12 +45,9 @@ function NoteCard({
           {note.file_name}
         </Text>
         <Text style={styles.noteMeta}>
-          {note.file_type.toUpperCase()} • {date}
-          {note.has_questions
-            ? <Text style={styles.noteReady}> • ✓ Ready</Text>
-            : <Text style={styles.noteParsing}> • Processing...</Text>
-          }
-        </Text>
+        {note.file_type.toUpperCase()} • {date}
+        <Text style={styles.noteReady}> • ✓ Parsed</Text>
+      </Text>
       </View>
       <TouchableOpacity
         onPress={onDelete}
@@ -147,6 +147,8 @@ export default function SubLessonScreen() {
 
   const [uploadStage,   setUploadStage]   = useState<UploadStage>('idle')
   const [materialsOpen, setMaterialsOpen] = useState(false)
+  const [showUploadSource, setShowUploadSource] = useState(false)
+  const [showDrivePicker,  setShowDrivePicker]   = useState(false)
 
   const isUploading = uploadStage !== 'idle' && uploadStage !== 'done'
 
@@ -159,12 +161,31 @@ export default function SubLessonScreen() {
     setMaterialsOpen(prev => !prev)
   }
 
-  const handleUpload = async () => {
+  const handlePhoneUpload = async () => {
     if (!user || !id) return
     try {
       const result = await uploadSubLessonNote({
         userId:      user.id,
         subLessonId: id,
+        onProgress:  setUploadStage,
+      })
+      if (result) await refetch()
+    } catch (err: any) {
+      Alert.alert('Upload Failed', err.message)
+    } finally {
+      setUploadStage('idle')
+    }
+  }
+  
+  const handleDriveFileSelected = async (file: {
+    uri: string; name: string; mimeType: string
+  }) => {
+    if (!user || !id) return
+    try {
+      const result = await uploadSubLessonNoteFromAsset({
+        userId:      user.id,
+        subLessonId: id,
+        asset:       file,
         onProgress:  setUploadStage,
       })
       if (result) await refetch()
@@ -294,9 +315,8 @@ export default function SubLessonScreen() {
               styles.dropzone,
               isUploading && styles.dropzoneActive,
             ]}
-            onPress={handleUpload}
+            onPress={() => setShowUploadSource(true)} disabled={isUploading}
             activeOpacity={0.8}
-            disabled={isUploading}
           >
             {isUploading ? (
               <UploadProgress stage={uploadStage} />
@@ -364,6 +384,17 @@ export default function SubLessonScreen() {
           </View>
         )}
       </ScrollView>
+      <UploadSourceSheet
+        visible={showUploadSource}
+        onClose={() => setShowUploadSource(false)}
+        onPhoneFiles={handlePhoneUpload}
+        onGoogleDrive={() => setShowDrivePicker(true)}
+      />
+      <DriveFilePicker
+        visible={showDrivePicker}
+        onClose={() => setShowDrivePicker(false)}
+        onSelect={handleDriveFileSelected}
+      />
     </View>
   )
 }

@@ -159,6 +159,7 @@ function SetupScreen({
     quick:      'Quick Quiz',
     review:     'Review Mistakes',
     practice:   'Practice Quiz',
+    custom:      'Selected Quiz'
   }
 
   return (
@@ -285,14 +286,15 @@ function QuizScreen({
 
     const isCorrect = index === current.correct_option_index
     const newAnswer: AttemptAnswer = {
-      questionId:    current.id,
+      questionId: current.id,
       selectedIndex: index,
       isCorrect,
-      correctIndex:  current.correct_option_index,
-      questionText:  current.question_text,
-      correctText:   current.answer_options.find(
+      correctIndex: current.correct_option_index,
+      questionText: current.question_text,
+      correctText: current.answer_options.find(
         o => o.option_index === current.correct_option_index
       )?.option_text ?? '',
+      explanation: null
     }
 
     if (isCorrect) setCorrectCount(prev => prev + 1)
@@ -470,9 +472,10 @@ function EmptyScreen({ title }: { title: string }) {
 // ─────────────────────────────────────────
 export default function StudySessionScreen() {
   const params = useLocalSearchParams<{
-    id:    string
-    mode:  string
-    title: string
+    id:       string
+    mode:     string
+    title:    string
+    noteIds?: string
   }>()
 
   const { user }  = useSession()
@@ -488,18 +491,21 @@ export default function StudySessionScreen() {
     if (!user) return
     try {
       setStep('loading')
+      const parsedNoteIds = params.noteIds ? JSON.parse(params.noteIds) : undefined
+  
       const qs = await fetchQuestions({
-        mode,
+        mode:    mode,
         id,
         count,
-        userId: user.id,
+        userId:  user.id,
+        noteIds: parsedNoteIds,
       })
-
+  
       if (!qs.length) {
         setStep('empty')
         return
       }
-
+  
       setQuestions(qs)
       setStep('quiz')
     } catch (err: any) {
@@ -548,7 +554,7 @@ export default function StudySessionScreen() {
     <View style={[styles.root, styles.center]}>
       <ActivityIndicator color={Colors.primary} size="large" />
       <Text style={styles.loadingText}>
-        {saving ? 'Saving results...' : 'Loading questions...'}
+        {saving ? 'Saving results...' : 'Preparing your quiz...'}
       </Text>
     </View>
   )

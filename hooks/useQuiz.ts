@@ -1,7 +1,7 @@
 
 
 import { supabase } from '@/lib/supabase'
-
+import { QuizAPI } from '@/lib/api'
 // ─────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────
@@ -14,6 +14,7 @@ export type QuizMode =
   | 'quick'
   | 'review'
   | 'practice'
+  | 'custom'
 
 export interface QuizQuestion {
   id:                   string
@@ -39,19 +40,65 @@ export interface AttemptAnswer {
   correctText:    string
   explanation:    string | null
 }
+const GENERATION_BANK_SIZE = 15
+
+async function ensureQuestionsExist(
+  noteIds: string[],
+  userId:  string
+): Promise<void> {
+  if (!noteIds.length) return
+
+  const { data: notes } = await supabase
+    .from('notes')
+    .select('id, parsed_text, lesson_id, sub_lesson_id')
+    .in('id', noteIds)
+
+  if (!notes?.length) return
+
+  const { data: existing } = await supabase
+    .from('questions')
+    .select('note_id')
+    .in('note_id', noteIds)
+
+  const notesWithQuestions = new Set((existing ?? []).map(q => q.note_id))
+
+  const notesNeedingGeneration = notes.filter(
+    n => n.parsed_text && !notesWithQuestions.has(n.id)
+  )
+
+  if (!notesNeedingGeneration.length) return
+
+  await Promise.all(
+    notesNeedingGeneration.map(note =>
+      QuizAPI.generate({
+        note_id:        note.id,
+        user_id:        userId,
+        question_count: GENERATION_BANK_SIZE,
+        lesson_id:      note.lesson_id,
+        sub_lesson_id:  note.sub_lesson_id,
+      }).catch(err => {
+        console.error('Generation failed for note:', note.id, err)
+      })
+    )
+  )
+}
 
 // ─────────────────────────────────────────
-// FETCH QUESTIONS BY MODE
+// FETCH QUESTIONS BY MODE — updated to generate on demand
 // ─────────────────────────────────────────
 export async function fetchQuestions(params: {
-  mode:   QuizMode
-  id:     string
-  count:  number
-  userId: string
+  mode:     QuizMode
+  id:       string
+  count:    number
+  userId:   string
+  noteIds?: string[]
 }): Promise<QuizQuestion[]> {
   let noteIds: string[] = []
 
   switch (params.mode) {
+    case 'custom':
+      noteIds = params.noteIds ?? []
+      break
     case 'sublesson':
       noteIds = await getNotesBySubLesson(params.id)
       break
@@ -78,6 +125,9 @@ export async function fetchQuestions(params: {
   }
 
   if (!noteIds.length) return []
+
+  await ensureQuestionsExist(noteIds, params.userId)
+
   return getQuestionsForNotes(noteIds, params.count)
 }
 
@@ -123,10 +173,13 @@ async function getNotesBySection(sectionId: string): Promise<string[]> {
 }
 
 async function getNotesByCourse(courseId: string): Promise<string[]> {
+  const { data: flatNotes } = await supabase
+    .from('notes').select('id').eq('course_id', courseId)
+
   const { data: sections } = await supabase
     .from('sections').select('id').eq('course_id', courseId)
 
-  const all: string[] = []
+  const all: string[] = (flatNotes ?? []).map(n => n.id)
   for (const s of sections ?? []) {
     all.push(...await getNotesBySection(s.id))
   }
@@ -218,6 +271,34 @@ async function getWrongAnswerQuestions(
 }
 
 // ─────────────────────────────────────────
+// RESOLVE COURSE ID FROM LESSON/SUB-LESSON
+// ─────────────────────────────────────────
+async function resolveCourseId(
+  lessonId:    string | null,
+  subLessonId: string | null
+): Promise<string | null> {
+  if (lessonId) {
+    const { data } = await supabase
+      .from('lessons')
+      .select('sections(course_id)')
+      .eq('id', lessonId)
+      .single()
+    return (data?.sections as any)?.course_id ?? null
+  }
+
+  if (subLessonId) {
+    const { data } = await supabase
+      .from('sub_lessons')
+      .select('lessons(sections(course_id))')
+      .eq('id', subLessonId)
+      .single()
+    return (data?.lessons as any)?.sections?.course_id ?? null
+  }
+
+  return null
+}
+
+// ─────────────────────────────────────────
 // SAVE QUIZ ATTEMPT + UPDATE PROGRESS
 // ─────────────────────────────────────────
 export async function saveQuizAttempt(params: {
@@ -230,10 +311,17 @@ export async function saveQuizAttempt(params: {
 }): Promise<{ attemptId: string; passed: boolean }> {
   const passed  = params.score / params.questionCount >= 0.8
 
-  // Determine lesson/sub-lesson FK
   const lessonId    = ['lesson','lesson_all','section','course','quick','practice']
     .includes(params.mode) ? params.id : null
   const subLessonId = params.mode === 'sublesson' ? params.id : null
+
+  // course/quick modes already have the course id directly in params.id —
+  // no lookup needed. Everything else resolves upward through lesson/sub-lesson.
+  const courseId = params.mode === 'quick' && params.id === 'all'
+  ? null
+  : ['course', 'quick', 'custom'].includes(params.mode)
+    ? params.id
+    : await resolveCourseId(lessonId, subLessonId)
 
   // 1. Save attempt
   const { data: attempt, error: attemptErr } = await supabase
@@ -242,6 +330,7 @@ export async function saveQuizAttempt(params: {
       user_id:        params.userId,
       lesson_id:      lessonId,
       sub_lesson_id:  subLessonId,
+      course_id:      courseId,
       question_count: params.questionCount,
       score:          params.score,
     })
@@ -300,3 +389,5 @@ function shuffle<T>(arr: T[]): T[] {
   }
   return copy
 }
+
+

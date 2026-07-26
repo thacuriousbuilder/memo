@@ -12,9 +12,13 @@ import { Colors, Spacing, Radius, Typography } from '@/constants/theme'
 import NewSubLessonModal from '@/components/modals/newSubLessonModal'
 import UploadProgress   from '@/components/uploadProgress'
 import { useSession }   from '@/hooks/useSession'
+import UploadSourceSheet from '@/components/modals/uploadSourceSheet'
+import DriveFilePicker   from '@/components/modals/driveFilePicker'
 import {
   useLesson,
   uploadLessonNote,
+  uploadLessonNoteFromAsset, 
+  createSubLessonsFromTabs, 
   deleteLessonNote,
   addSubLesson,
   SubLessonItem,
@@ -25,19 +29,6 @@ import React from 'react'
 
 if (Platform.OS === 'android') {
   UIManager.setLayoutAnimationEnabledExperimental?.(true)
-}
-
-// ─────────────────────────────────────────
-// STAGE LABEL
-// ─────────────────────────────────────────
-function getStageLabel(stage: UploadStage): string {
-  switch (stage) {
-    case 'uploading':  return 'Uploading notes...'
-    case 'parsing':    return 'Reading content...'
-    case 'generating': return 'Generating questions...'
-    case 'done':       return '✓ Questions ready!'
-    default:           return 'Upload Notes'
-  }
 }
 
 // ─────────────────────────────────────────
@@ -138,6 +129,9 @@ export default function LessonScreen() {
   const [uploadStage,      setUploadStage]      = useState<UploadStage>('idle')
   const [showAddSubLesson, setShowAddSubLesson]  = useState(false)
   const [subLessonsOpen,   setSubLessonsOpen]    = useState(true)
+  const [showUploadSource, setShowUploadSource] = useState(false)
+  const [showDrivePicker,  setShowDrivePicker]   = useState(false)
+  const [importingTabs, setImportingTabs] = useState(false)
 
   const isUploading = uploadStage !== 'idle' && uploadStage !== 'done'
 
@@ -145,7 +139,7 @@ export default function LessonScreen() {
     React.useCallback(() => { refetch() }, [refetch])
   )
 
-  const handleUpload = async () => {
+  const handlePhoneUpload = async () => {
     if (!user || !id) return
     try {
       const result = await uploadLessonNote({
@@ -158,6 +152,42 @@ export default function LessonScreen() {
       Alert.alert('Upload Failed', err.message)
     } finally {
       setUploadStage('idle')
+    }
+  }
+  
+  const handleDriveFileSelected = async (file: {
+    uri: string; name: string; mimeType: string
+  }) => {
+    if (!user || !id) return
+    try {
+      const result = await uploadLessonNoteFromAsset({
+        userId:     user.id,
+        lessonId:   id,
+        asset:      file,
+        onProgress: setUploadStage,
+      })
+      if (result) await refetch()
+    } catch (err: any) {
+      Alert.alert('Upload Failed', err.message)
+    } finally {
+      setUploadStage('idle')
+    }
+  }
+
+  const handleImportTabs = async (tabs: { title: string; text: string }[]) => {
+    if (!id || tabs.length === 0) return
+    setImportingTabs(true)
+    try {
+      await createSubLessonsFromTabs({
+        lessonId:        id,
+        tabs,
+        startOrderIndex: lesson?.sub_lessons.length ?? 0,
+      })
+      await refetch()
+    } catch (err: any) {
+      Alert.alert('Import Failed', err.message)
+    } finally {
+      setImportingTabs(false)
     }
   }
 
@@ -192,6 +222,7 @@ export default function LessonScreen() {
     })
     await refetch()
   }
+  
 
   if (loading) return (
     <View style={[styles.root, styles.center]}>
@@ -279,9 +310,8 @@ export default function LessonScreen() {
               styles.dropzone,
               isUploading && styles.dropzoneActive,
             ]}
-            onPress={handleUpload}
+            onPress={() => setShowUploadSource(true)} disabled={isUploading}
             activeOpacity={0.8}
-            disabled={isUploading}
           >
             {isUploading ? (
               <UploadProgress stage={uploadStage} />
@@ -395,6 +425,18 @@ export default function LessonScreen() {
         visible={showAddSubLesson}
         onClose={() => setShowAddSubLesson(false)}
         onCreate={handleAddSubLesson}
+      />
+      <UploadSourceSheet
+        visible={showUploadSource}
+        onClose={() => setShowUploadSource(false)}
+        onPhoneFiles={handlePhoneUpload}
+        onGoogleDrive={() => setShowDrivePicker(true)}
+      />
+      <DriveFilePicker
+        visible={showDrivePicker}
+        onClose={() => setShowDrivePicker(false)}
+        onSelect={handleDriveFileSelected}
+        onImportTabs={handleImportTabs}
       />
     </View>
   )

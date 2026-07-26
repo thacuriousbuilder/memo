@@ -54,7 +54,7 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <StatusBar style="light" backgroundColor={Colors.background} />
+      <StatusBar style="dark" backgroundColor={Colors.background} />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)"          />
         <Stack.Screen name="(auth)"          />
@@ -63,6 +63,8 @@ export default function RootLayout() {
         <Stack.Screen name="sublesson/[id]"  />
         <Stack.Screen name="results"  options={{ headerShown: false }} />
         <Stack.Screen name="study/[id]" />
+        <Stack.Screen name="course/create" options={{ headerShown: false }}/>
+        <Stack.Screen name="course/folder" options={{ headerShown: false }} />
       </Stack>
     </GestureHandlerRootView>
   )

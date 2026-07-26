@@ -16,7 +16,7 @@ import {
       iconBg:   Colors.primary,
       title:    'Create Course',
       subtitle: 'Start a new course from scratch',
-      route:    '/(tabs)/courses',
+      route:    '/(course)/create',
       action:   'new_course',
     },
     {
@@ -43,7 +43,7 @@ import {
     const handleOption = (option: typeof OPTIONS[0]) => {
       // Navigate to courses tab
       // In future each action can open its specific modal
-      router.push('/(tabs)/courses')
+      router.push('/course/create')
     }
   
     return (

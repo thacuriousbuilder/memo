@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { supabase }        from '@/lib/supabase'
-import { FilesAPI, QuizAPI } from '@/lib/api'
+import { FilesAPI } from '@/lib/api'
 import {
   buildS3Key,
   getFileType,
@@ -158,7 +158,50 @@ export async function createSubLesson(params: {
 }
 
 // ─────────────────────────────────────────
-// UPLOAD NOTE — synchronous pipeline
+// SHARED UPLOAD CORE — accepts any pre-picked asset
+// ─────────────────────────────────────────
+async function uploadAssetToSubLesson(params: {
+  userId:      string
+  subLessonId: string
+  asset: {
+    uri:       string
+    name:      string
+    mimeType?: string
+  }
+  onProgress?: (stage: UploadStage) => void
+}): Promise<string | null> {
+  const { userId, subLessonId, asset, onProgress } = params
+
+  const fileType    = getFileType(asset.uri)
+  const contentType = getContentType(fileType)
+  const s3Key       = buildS3Key(userId, subLessonId, asset.name)
+
+  onProgress?.('uploading')
+  const { upload_url } = await FilesAPI.presign({
+    s3_key: s3Key, content_type: contentType, user_id: userId,
+  })
+  await uploadFileToS3(asset.uri, upload_url, contentType)
+
+  const { data: note, error } = await supabase
+    .from('notes')
+    .insert({
+      lesson_id: null, sub_lesson_id: subLessonId,
+      file_name: asset.name, file_type: fileType, s3_key: s3Key,
+    })
+    .select('id').single()
+  if (error) throw error
+
+  // Parse only — no generate call. Questions are created on-demand at quiz time.
+  onProgress?.('parsing')
+  await FilesAPI.parse({
+    s3_key: s3Key, user_id: userId, note_id: note.id, file_type: fileType,
+  })
+
+  onProgress?.('done')
+  return note.id
+}
+// ─────────────────────────────────────────
+// UPLOAD FROM PICKER — sublesson/[id].tsx default flow
 // ─────────────────────────────────────────
 export async function uploadSubLessonNote(params: {
   userId:      string
@@ -167,69 +210,35 @@ export async function uploadSubLessonNote(params: {
 }): Promise<string | null> {
   const result = await DocumentPicker.getDocumentAsync({
     type: [
-      'application/pdf',
-      'text/plain',
+      'application/pdf', 'text/plain',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ],
     multiple: false,
   })
-
   if (result.canceled || !result.assets?.[0]) return null
 
-  const asset       = result.assets[0]
-  const fileType    = getFileType(asset.uri)
-  const contentType = getContentType(fileType)
-  const s3Key       = buildS3Key(
-    params.userId,
-    params.subLessonId,
-    asset.name
-  )
-
-  // 1. Presign + Upload
-  params.onProgress?.('uploading')
-  const { upload_url } = await FilesAPI.presign({
-    s3_key:       s3Key,
-    content_type: contentType,
-    user_id:      params.userId,
+  return uploadAssetToSubLesson({
+    userId: params.userId,
+    subLessonId: params.subLessonId,
+    asset: result.assets[0],
+    onProgress: params.onProgress,
   })
-  await uploadFileToS3(asset.uri, upload_url, contentType)
+}
 
-  // 2. Create note record
-  const { data: note, error } = await supabase
-    .from('notes')
-    .insert({
-      lesson_id:     null,
-      sub_lesson_id: params.subLessonId,
-      file_name:     asset.name,
-      file_type:     fileType,
-      s3_key:        s3Key,
-    })
-    .select('id')
-    .single()
-
-  if (error) throw error
-
-  // 3. Parse — synchronous
-  params.onProgress?.('parsing')
-  await FilesAPI.parse({
-    s3_key:    s3Key,
-    user_id:   params.userId,
-    note_id:   note.id,
-    file_type: fileType,
-  })
-
-  // 4. Generate — synchronous
-  params.onProgress?.('generating')
-  await QuizAPI.generate({
-    note_id:        note.id,
-    user_id:        params.userId,
-    question_count: 10,
-    lesson_id:      null,
-    sub_lesson_id:  params.subLessonId,
-  })
-
-  params.onProgress?.('done')
-  return note.id
+// ─────────────────────────────────────────
+// UPLOAD PRE-PICKED ASSET — Google Drive flow
+// ─────────────────────────────────────────
+export async function uploadSubLessonNoteFromAsset(params: {
+  userId:      string
+  subLessonId: string
+  asset: {
+    uri:       string
+    name:      string
+    mimeType?: string
+  }
+  onProgress?: (stage: UploadStage) => void
+}): Promise<string | null> {
+  return uploadAssetToSubLesson(params)
 }
 
 // ─────────────────────────────────────────

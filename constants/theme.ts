@@ -5,59 +5,59 @@
 // ─────────────────────────────────────────
 export const Colors = {
   // Backgrounds
-  background:   '#0d0d0d',
-  card:         '#1a1a1a',
-  cardElevated: '#222222',
-  overlay:      'rgba(13, 13, 13, 0.85)',
+  background:   '#F5F5F7',
+  card:         '#FFFFFF',
+  cardElevated: '#F0F0F3',
+  overlay:      'rgba(0, 0, 0, 0.45)',
 
-  // Primary — warm purple
+  // Primary — warm purple (unchanged)
   primary:      '#8B7CF6',
   primaryLight: '#A78BFA',
-  primaryMuted: 'rgba(139, 124, 246, 0.15)',
+  primaryMuted: 'rgba(139, 124, 246, 0.12)',
   primaryBorder:'rgba(139, 124, 246, 0.3)',
 
   // Borders
-  border:       '#2a2a2a',
-  borderLight:  '#333333',
+  border:       '#E5E5EA',
+  borderLight:  '#D1D1D6',
 
   // Text
-  textPrimary:  '#F2F0FF',
-  textSecondary:'#7A7590',
-  textMuted:    '#555555',
-  textInverse:  '#ffffff',
+  textPrimary:  '#1C1C1E',
+  textSecondary:'#6E6E73',
+  textMuted:    '#AEAEB2',
+  textInverse:  '#FFFFFF',
 
   // Status
-  success:      '#34D399',
-  successMuted: 'rgba(52, 211, 153, 0.15)',
-  error:        '#EF4444',
-  errorMuted:   'rgba(239, 68, 68, 0.15)',
-  warning:      '#F59E0B',
-  warningMuted: 'rgba(245, 158, 11, 0.15)',
+  success:      '#10B981',
+  successMuted: 'rgba(16, 185, 129, 0.12)',
+  error:        '#DC2626',
+  errorMuted:   'rgba(220, 38, 38, 0.1)',
+  warning:      '#D97706',
+  warningMuted: 'rgba(217, 119, 6, 0.12)',
 
   // Progress
-  progressTrack:'#2a2a2a',
+  progressTrack:'#E5E5EA',
   progressFill: '#8B7CF6',
 
   // Locked state
-  locked:       '#2a2a2a',
-  lockedText:   '#555555',
+  locked:       '#E5E5EA',
+  lockedText:   '#AEAEB2',
 
   // Tab bar
   tabActive:      '#8B7CF6',
-  tabInactive:    '#555555',
-  tabBackground:  '#0d0d0d',
-  tabBorder:      '#2a2a2a',
+  tabInactive:    '#8A8A8E',
+  tabBackground:  '#FFFFFF',
+  tabBorder:      '#E5E5EA',
 
   // Quiz answer states
-  answerDefault:       '#1a1a1a',
-  answerCorrect:       'rgba(52, 211, 153, 0.2)',
-  answerWrong:         'rgba(239, 68, 68, 0.2)',
-  answerBorderCorrect: '#34D399',
-  answerBorderWrong:   '#EF4444',
+  answerDefault:       '#FFFFFF',
+  answerCorrect:       'rgba(16, 185, 129, 0.12)',
+  answerWrong:         'rgba(220, 38, 38, 0.1)',
+  answerBorderCorrect: '#10B981',
+  answerBorderWrong:   '#DC2626',
 } as const
 
 // ─────────────────────────────────────────
-// TYPOGRAPHY
+// TYPOGRAPHY (unchanged)
 // ─────────────────────────────────────────
 export const Typography = {
   xs:   11,
@@ -81,7 +81,7 @@ export const Typography = {
 } as const
 
 // ─────────────────────────────────────────
-// SPACING
+// SPACING (unchanged)
 // ─────────────────────────────────────────
 export const Spacing = {
   xs:   4,
@@ -95,7 +95,7 @@ export const Spacing = {
 } as const
 
 // ─────────────────────────────────────────
-// BORDER RADIUS
+// BORDER RADIUS (unchanged)
 // ─────────────────────────────────────────
 export const Radius = {
   sm:   6,
@@ -107,41 +107,42 @@ export const Radius = {
 } as const
 
 // ─────────────────────────────────────────
-// SHADOWS
+// SHADOWS — lightened; the old dark-mode
+// shadow opacities look muddy on white cards
 // ─────────────────────────────────────────
 export const Shadows = {
   sm: {
     shadowColor:   '#000',
     shadowOffset:  { width: 0, height: 1 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.06,
     shadowRadius:  3,
     elevation:     2,
   },
   md: {
     shadowColor:   '#000',
     shadowOffset:  { width: 0, height: 4 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.08,
     shadowRadius:  8,
     elevation:     5,
   },
   lg: {
     shadowColor:   '#000',
     shadowOffset:  { width: 0, height: 8 },
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.1,
     shadowRadius:  16,
     elevation:     10,
   },
   purple: {
     shadowColor:   '#8B7CF6',
     shadowOffset:  { width: 0, height: 4 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.25,
     shadowRadius:  8,
     elevation:     8,
   },
 } as const
 
 // ─────────────────────────────────────────
-// COMPONENT TOKENS
+// COMPONENT TOKENS (unchanged — reference Colors dynamically)
 // ─────────────────────────────────────────
 export const CardBase = {
   backgroundColor: Colors.card,
@@ -169,7 +170,7 @@ export const ButtonGhost = {
 } as const
 
 // ─────────────────────────────────────────
-// PROGRESS RING SIZES
+// PROGRESS RING SIZES (unchanged)
 // ─────────────────────────────────────────
 export const ProgressRing = {
   sm:  { size: 40,  strokeWidth: 4  },

@@ -1,4 +1,4 @@
-
+// lib/api.ts
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -21,7 +21,17 @@ async function request<T>(
   const data = await response.json()
 
   if (!response.ok) {
-    throw new Error(data.detail ?? `Request failed: ${response.status}`)
+    let message: string
+    if (typeof data.detail === 'string') {
+      message = data.detail
+    } else if (Array.isArray(data.detail)) {
+      message = data.detail.map((e: any) => e.msg).join(', ')
+    } else if (typeof data.detail === 'object' && data.detail !== null) {
+      message = JSON.stringify(data.detail)
+    } else {
+      message = `Request failed: ${response.status}`
+    }
+    throw new Error(message)
   }
 
   return data as T
@@ -63,7 +73,19 @@ export const FilesAPI = {
       body:   JSON.stringify(params),
     }),
 
-  // ── Smart Import ──
+  parseTemp: (params: {
+    s3_key:    string
+    file_type: string
+    user_id:   string
+  }) =>
+    request<{ parsed_text: string; word_count: number }>(
+      '/files/parse-temp',
+      {
+        method: 'POST',
+        body:   JSON.stringify(params),
+      }
+    ),
+
   analyzeStructure: (params: {
     course_name: string
     files: {
@@ -209,7 +231,6 @@ export interface QuizQuestion {
   }[]
 }
 
-// ── Smart Import Types ──
 export interface StructureSuggestion {
   sections: SectionSuggestion[]
 }

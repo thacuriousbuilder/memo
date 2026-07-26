@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { supabase }   from '@/lib/supabase'
-import { FilesAPI, QuizAPI }   from '@/lib/api'
+import { FilesAPI }   from '@/lib/api'
 import {
   buildS3Key,
   getFileType,
@@ -98,8 +98,9 @@ export interface CourseDetail {
   title:           string
   emoji:           string
   color:           string | null
-  semester:        string | null
+  course_group:        string | null
   description:     string | null
+  mode:            'structured' | 'folder' 
   total_lessons:   number
   done_lessons:    number
   progress_pct:    number
@@ -261,8 +262,9 @@ export function useCourseDetail(
         title:           data.title,
         emoji:           data.emoji,
         color:           data.color,
-        semester:        data.semester ?? null,
+        course_group:        data.course_group ?? null,
         description:     data.description,
+        mode:            data.mode ?? 'structured', 
         total_lessons:   totalLessons,
         done_lessons:    doneLessons,
         progress_pct:    totalLessons > 0
@@ -439,9 +441,7 @@ async function uploadAssetToLesson(params: {
   // 1. Presign + Upload
   onProgress?.('uploading')
   const { upload_url } = await FilesAPI.presign({
-    s3_key:       s3Key,
-    content_type: contentType,
-    user_id:      userId,
+    s3_key: s3Key, content_type: contentType, user_id: userId,
   })
   await uploadFileToS3(asset.uri, upload_url, contentType)
 
@@ -449,34 +449,16 @@ async function uploadAssetToLesson(params: {
   const { data: note, error } = await supabase
     .from('notes')
     .insert({
-      lesson_id:     lessonId,
-      sub_lesson_id: null,
-      file_name:     asset.name,
-      file_type:     fileType,
-      s3_key:        s3Key,
+      lesson_id: lessonId, sub_lesson_id: null,
+      file_name: asset.name, file_type: fileType, s3_key: s3Key,
     })
-    .select('id')
-    .single()
-
+    .select('id').single()
   if (error) throw error
 
-  // 3. Parse — synchronous
+  // 3. Parse — synchronous. No generate call — questions are created on-demand at quiz time.
   onProgress?.('parsing')
   await FilesAPI.parse({
-    s3_key:    s3Key,
-    user_id:   userId,
-    note_id:   note.id,
-    file_type: fileType,
-  })
-
-  // 4. Generate — synchronous
-  onProgress?.('generating')
-  await QuizAPI.generate({
-    note_id:        note.id,
-    user_id:        userId,
-    question_count: 10,
-    lesson_id:      lessonId,
-    sub_lesson_id:  null,
+    s3_key: s3Key, user_id: userId, note_id: note.id, file_type: fileType,
   })
 
   onProgress?.('done')
@@ -597,4 +579,43 @@ export async function addSubLesson(params: {
       order_index: params.orderIndex,
     })
   if (error) throw error
+}
+
+// ─────────────────────────────────────────
+// CREATE SUB-LESSONS FROM GOOGLE DOC TABS
+// Text is already extracted — no S3/parse needed.
+// ─────────────────────────────────────────
+export async function createSubLessonsFromTabs(params: {
+  lessonId:        string
+  tabs:            { title: string; text: string }[]
+  startOrderIndex: number
+}): Promise<void> {
+  for (let i = 0; i < params.tabs.length; i++) {
+    const tab = params.tabs[i]
+
+    const { data: sub, error: subErr } = await supabase
+      .from('sub_lessons')
+      .insert({
+        lesson_id:   params.lessonId,
+        title:       tab.title,
+        order_index: params.startOrderIndex + i,
+      })
+      .select('id')
+      .single()
+    if (subErr) throw subErr
+
+    const syntheticKey = `gdocs-tab/${params.lessonId}/${sub.id}`
+
+    const { error: noteErr } = await supabase
+      .from('notes')
+      .insert({
+        lesson_id:     null,
+        sub_lesson_id: sub.id,
+        file_name:     tab.title,
+        file_type:     'gdoc_tab',
+        s3_key:        syntheticKey,
+        parsed_text:   tab.text,
+      })
+    if (noteErr) throw noteErr
+  }
 }

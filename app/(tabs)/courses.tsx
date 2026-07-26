@@ -1,19 +1,17 @@
+ 
 
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, ActivityIndicator, Alert, Animated
 } from 'react-native'
-import { useState } from 'react'
 import { router } from 'expo-router'
-import { Ionicons } from '@expo/vector-icons'
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Swipeable } from 'react-native-gesture-handler'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
-import NewCourseModal from '@/components/modals/newCourseModal'
 import EmptyState     from '@/components/emptyState'
 import { useSession } from '@/hooks/useSession'
 import {
   useCourses,
-  createCourse,
   deleteCourse,
   getExamBadge,
   CourseWithMeta,
@@ -58,14 +56,22 @@ function CourseCard({
   ) => {
     const translateX = progress.interpolate({
       inputRange:  [0, 1],
-      outputRange: [80, 0],
+      outputRange: [160, 0],
     })
 
     return (
       <Animated.View style={[
-        styles.deleteAction,
+        styles.actionsContainer,
         { transform: [{ translateX }] },
       ]}>
+        <TouchableOpacity
+          style={styles.editButton}
+          onPress={() => router.push(`/course/edit/${course.id}`)}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="pencil-outline" size={20} color="#fff" />
+          <Text style={styles.deleteText}>Edit</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={styles.deleteButton}
           onPress={handleDelete}
@@ -84,18 +90,21 @@ function CourseCard({
       overshootRight={false}
       friction={2}
     >
-      <TouchableOpacity
-        style={styles.courseCard}
-        activeOpacity={0.8}
-        onPress={() => router.push(`/course/${course.id}`)}
-      >
-        {/* Accent bar */}
+    <TouchableOpacity
+  style={styles.courseCard}
+  activeOpacity={0.8}
+  onPress={() => router.push(`/course/${course.id}`)}
+>
         <View style={[
-          styles.accentBar,
-          { backgroundColor: course.color ?? Colors.primary }
-        ]} />
-
-        <Text style={styles.courseEmoji}>{course.emoji}</Text>
+          styles.iconBadge,
+          { backgroundColor: (course.color ?? Colors.primary) + '22' }
+        ]}>
+          <MaterialCommunityIcons
+            name={course.emoji as any}
+            size={22}
+            color={course.color ?? Colors.primary}
+          />
+        </View>
 
         <View style={styles.courseInfo}>
           {/* Title + exam badge */}
@@ -135,14 +144,14 @@ function CourseCard({
 
           {/* Meta */}
           <View style={styles.courseMeta}>
-            <Text style={styles.metaText}>
-              {course.total_lessons} lessons
-            </Text>
-            <View style={styles.metaDot} />
-            <Text style={styles.metaText}>
-              {course.progress_pct}% complete
-            </Text>
-          </View>
+          <Text style={styles.metaText}>
+            {course.notes_count ?? 0} {(course.notes_count ?? 0) === 1 ? 'note' : 'notes'}
+          </Text>
+          <View style={styles.metaDot} />
+          <Text style={styles.metaText}>
+            {course.progress_pct}% complete
+          </Text>
+        </View>
         </View>
 
         <Ionicons
@@ -156,15 +165,14 @@ function CourseCard({
 }
 
 // ─────────────────────────────────────────
-// GROUP COURSES BY SEMESTER
+// GROUP COURSES BY course_group
 // ─────────────────────────────────────────
-function groupBySemester(courses: CourseWithMeta[]) {
+function groupBycourse_group(courses: CourseWithMeta[]) {
   const map = new Map<string, CourseWithMeta[]>()
 
   courses.forEach(course => {
-    // Use semester field on course, not section title
-    const label = course.semester
-      ? course.semester.toUpperCase()
+    const label = course.course_group
+      ? course.course_group.toUpperCase()
       : 'OTHER COURSES'
 
     if (!map.has(label)) map.set(label, [])
@@ -183,50 +191,21 @@ function groupBySemester(courses: CourseWithMeta[]) {
 export default function CoursesScreen() {
   const { user }                             = useSession()
   const { courses, loading, error, refetch } = useCourses(user?.id ?? null)
-  const [showNewCourse, setShowNewCourse]    = useState(false)
-  const [creating,      setCreating]         = useState(false)
 
-  const grouped = groupBySemester(courses)
-
-  const handleCreate = async (form: {
-    name:        string
-    description: string
-    semester:    string
-    emoji:       string
-    color:       string
-  }) => {
-    if (!user) return
-    try {
-      setCreating(true)
-      await createCourse({
-        userId:      user.id,
-        title:       form.name,
-        description: form.description,
-        emoji:       form.emoji,
-        color:       form.color,
-        semester:    form.semester,
-      })
-      await refetch()
-      setShowNewCourse(false)
-    } catch (err: any) {
-      Alert.alert('Error', err.message)
-    } finally {
-      setCreating(false)
-    }
-  }
+  const grouped = groupBycourse_group(courses)
 
   return (
     <View style={styles.root}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Courses</Text>
+        <Text style={styles.headerTitle}>Courses</Text>
         <TouchableOpacity
           style={styles.newCourseButton}
-          activeOpacity={0.8}
-          onPress={() => setShowNewCourse(true)}
+          activeOpacity={0.7}
+          onPress={() => router.push('/course/create')}
         >
-          <Ionicons name="add" size={18} color={Colors.textInverse} />
-          <Text style={styles.newCourseText}>New Course</Text>
+          <Ionicons name="add" size={18} color={Colors.primary} />
+          <Text style={styles.newCourseText}>New</Text>
         </TouchableOpacity>
       </View>
 
@@ -251,7 +230,7 @@ export default function CoursesScreen() {
           title="No Courses Yet"
           subtitle="Create your first course to start organizing your study materials."
           actionLabel="New Course"
-          onAction={() => setShowNewCourse(true)}
+          onAction={() => router.push('/course/create')}
         />
       ) : (
         <ScrollView
@@ -274,12 +253,6 @@ export default function CoursesScreen() {
           ))}
         </ScrollView>
       )}
-
-      <NewCourseModal
-        visible={showNewCourse}
-        onClose={() => setShowNewCourse(false)}
-        onCreate={handleCreate}
-      />
     </View>
   )
 }
@@ -314,18 +287,14 @@ const styles = StyleSheet.create({
     color:      Colors.textPrimary,
   },
   newCourseButton: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    gap:               Spacing.xs,
-    backgroundColor:   Colors.primary,
-    borderRadius:      Radius.full,
-    paddingVertical:   Spacing.sm,
-    paddingHorizontal: Spacing.md,
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           2,
   },
   newCourseText: {
-    fontSize:   Typography.sm,
+    fontSize:   Typography.base,
     fontWeight: Typography.semibold,
-    color:      Colors.textInverse,
+    color:      Colors.primary,
   },
 
   // Scroll
@@ -371,18 +340,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems:    'center',
     padding:       Spacing.md,
-    paddingLeft:   Spacing.md + 4,
     gap:           Spacing.md,
     overflow:      'hidden',
   },
-  accentBar: {
-    position: 'absolute',
-    left:     0,
-    top:      0,
-    bottom:   0,
-    width:    4,
+  iconBadge: {
+    width:          44,
+    height:         44,
+    borderRadius:   Radius.full,
+    alignItems:     'center',
+    justifyContent: 'center',
+    flexShrink:     0,
   },
-  courseEmoji: { fontSize: 28 },
   courseInfo:  { flex: 1, gap: 4 },
   courseNameRow: {
     flexDirection: 'row',
@@ -426,18 +394,24 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.textMuted,
   },
 
-  // Swipe Delete
-  deleteAction: {
-    width:          80,
-    justifyContent: 'center',
-    alignItems:     'center',
-    marginBottom:   Spacing.sm,
-    borderRadius:   Radius.lg,
-    overflow:       'hidden',
+  // Swipe Actions
+  actionsContainer: {
+    flexDirection: 'row',
+    width:         160,
+    marginBottom:  Spacing.sm,
+    borderRadius:  Radius.lg,
+    overflow:      'hidden',
+    gap:           2,
+  },
+  editButton: {
+    flex:            1,
+    backgroundColor: Colors.primary,
+    justifyContent:  'center',
+    alignItems:      'center',
+    gap:             4,
   },
   deleteButton: {
     flex:            1,
-    width:           '100%',
     backgroundColor: Colors.error,
     justifyContent:  'center',
     alignItems:      'center',

@@ -3,15 +3,18 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase }  from '@/lib/supabase'
 import { Course, Section, Lesson, Exam, UpcomingExam } from '@/types'
+import { useFocusEffect } from 'expo-router'
 
 // ─────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────
 export interface CourseWithMeta extends Course {
-  semester:       string | null
+  mode: 'structured' | 'folder'  
+  course_group:       string | null
   sections:       SectionWithLessons[]
   upcoming_exams: UpcomingExam[]
   total_lessons:  number
+  notes_count: number
   done_lessons:   number
   progress_pct:   number
 }
@@ -48,6 +51,7 @@ export function useCourses(userId: string | null) {
         .from('courses')
         .select(`
           *,
+          notes (id),
           sections (
             *,
             lessons (
@@ -119,6 +123,7 @@ export function useCourses(userId: string | null) {
           total_lessons:  totalLessons,
           done_lessons:   doneLessons,
           progress_pct:   progressPct,
+          notes_count:    (course.notes ?? []).length, 
         }
       })
 
@@ -130,9 +135,11 @@ export function useCourses(userId: string | null) {
     }
   }, [userId])
 
-  useEffect(() => {
-    fetchCourses()
-  }, [fetchCourses])
+  useFocusEffect(
+    useCallback(() => {
+      fetchCourses()
+    }, [fetchCourses])
+  )
 
   return { courses, loading, error, refetch: fetchCourses }
 }
@@ -147,9 +154,9 @@ export async function createCourse(params: {
   description: string
   emoji:       string
   color:       string
-  semester?:   string
+  course_group?:   string
 }): Promise<Course> {
-  // 1. Create course — store semester as metadata
+  // 1. Create course — store course_group as metadata
   const { data: course, error: courseError } = await supabase
     .from('courses')
     .insert({
@@ -158,7 +165,7 @@ export async function createCourse(params: {
       description: params.description || null,
       emoji:       params.emoji,
       color:       params.color,
-      semester:    params.semester || null,  // ← just metadata
+      course_group:    params.course_group || null,  // ← just metadata
     })
     .select()
     .single()
@@ -208,4 +215,29 @@ export function getExamBadge(
   if (days <= 3)  return { label: `${next.exam_type.charAt(0).toUpperCase() + next.exam_type.slice(1)} in ${days}d`, urgent: true  }
   if (days <= 14) return { label: `${next.exam_type.charAt(0).toUpperCase() + next.exam_type.slice(1)} in ${days}d`, urgent: false }
   return null
+}
+
+// ─────────────────────────────────────────
+// UPDATE COURSE — basics only (name, emoji, group, description, color)
+// ─────────────────────────────────────────
+export async function updateCourse(params: {
+  courseId:     string
+  title:        string
+  description:  string
+  emoji:        string
+  color:        string
+  course_group: string
+}): Promise<void> {
+  const { error } = await supabase
+    .from('courses')
+    .update({
+      title:        params.title,
+      description:  params.description || null,
+      emoji:        params.emoji,
+      color:        params.color,
+      course_group: params.course_group || null,
+    })
+    .eq('id', params.courseId)
+
+  if (error) throw error
 }
