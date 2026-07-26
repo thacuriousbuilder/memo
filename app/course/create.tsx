@@ -2,7 +2,8 @@
 
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Alert
+  StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Alert,
+  ActivityIndicator
 } from 'react-native'
 import { useState, useMemo } from 'react'
 import { router } from 'expo-router'
@@ -14,6 +15,12 @@ import { useCourses } from '@/hooks/useCourses'
 import * as DocumentPicker from 'expo-document-picker'
 import UploadSourceSheet from '@/components/modals/uploadSourceSheet'
 import DriveFilePicker   from '@/components/modals/driveFilePicker'
+import { useEffect } from 'react'
+import { FilesAPI } from '@/lib/api'
+import { buildS3Key, getFileType, getContentType, uploadFileToS3 } from '@/lib/aws'
+import { supabase } from '@/lib/supabase'
+import OrganizeList from '@/components/organizeList'
+import { useSession as useSessionHook } from '@/hooks/useSession'  
 
 const STEPS = ['Details', 'Upload', 'Organize']
 
@@ -30,6 +37,23 @@ export interface PickedFile {
   mimeType: string
   size?:    number
 }
+
+export interface OrganizeItem {
+  localId:    string
+  title:      string
+  depth:      0 | 1 | 2
+  kind:       'folder' | 'topic' | 'subtopic'
+  fileIndex?: number   // present for topics — which uploaded file backs it
+}
+
+interface TempNote {
+  file_index:  number
+  s3_key:      string
+  file_name:   string
+  file_type:   string
+  parsed_text: string
+}
+
 
 // ─────────────────────────────────────────
 // PROGRESS HEADER
@@ -282,6 +306,295 @@ function StepUpload({
   )
 }
 
+// ─────────────────────────────────────────
+// BUILD FLAT ITEMS FROM AI STRUCTURE RESPONSE
+// ─────────────────────────────────────────
+function buildFlatItems(structure: any): OrganizeItem[] {
+  const items: OrganizeItem[] = []
+  structure.sections.forEach((sec: any, si: number) => {
+    items.push({ localId: `folder_${si}`, title: sec.title, depth: 0, kind: 'folder' })
+    sec.lessons.forEach((les: any, li: number) => {
+      items.push({ localId: `topic_${si}_${li}`, title: les.title, depth: 1, kind: 'topic', fileIndex: les.file_index })
+      ;(les.sub_lessons ?? []).forEach((sub: any, xi: number) => {
+        items.push({ localId: `sub_${si}_${li}_${xi}`, title: sub.title, depth: 2, kind: 'subtopic' })
+      })
+    })
+  })
+  return items
+}
+
+// ─────────────────────────────────────────
+// STEP 3 — ORGANIZE (analysis phase for now)
+// ─────────────────────────────────────────
+function StepOrganize({
+  courseDetails, files, onBack, onNext,
+}: {
+  courseDetails: CourseDetails
+  files:         PickedFile[]
+  onBack:        () => void
+  onNext:        (items: OrganizeItem[], tempNotes: TempNote[]) => void
+}) {
+  const { user } = useSession()
+  const [analyzing, setAnalyzing] = useState(true)
+  const [error,     setError]     = useState<string | null>(null)
+  const [items,     setItems]     = useState<OrganizeItem[]>([])
+  const [tempNotes, setTempNotes] = useState<TempNote[]>([])
+
+  useEffect(() => {
+    if (!user) return
+    runAnalysis()
+  }, [user])
+
+  const runAnalysis = async () => {
+    if (!user) return
+    try {
+      setAnalyzing(true)
+      setError(null)
+
+      if (files.length === 0) {
+        setItems([])
+        setTempNotes([])
+        setAnalyzing(false)
+        return
+      }
+
+      const notes: TempNote[] = []
+      for (let i = 0; i < files.length; i++) {
+        const file        = files[i]
+        const fileType     = getFileType(file.uri)
+        const contentType  = getContentType(fileType)
+        const s3Key        = buildS3Key(user.id, `temp_${Date.now()}_${i}`, file.name)
+        const { upload_url } = await FilesAPI.presign({ s3_key: s3Key, content_type: contentType, user_id: user.id })
+        await uploadFileToS3(file.uri, upload_url, contentType)
+        const { parsed_text } = await FilesAPI.parseTemp({ s3_key: s3Key, file_type: fileType, user_id: user.id })
+        notes.push({ file_index: i, s3_key: s3Key, file_name: file.name, file_type: fileType, parsed_text })
+      }
+      setTempNotes(notes)
+
+      if (files.length === 1) {
+        const lessonName = files[0].name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ').trim()
+        setItems([{ localId: 'topic_0', title: lessonName, depth: 1, kind: 'topic', fileIndex: 0 }])
+      } else {
+        const { structure } = await FilesAPI.analyzeStructure({
+          course_name: courseDetails.name,
+          files: notes.map(n => ({ file_name: n.file_name, parsed_text: n.parsed_text, note_id: '' })),
+        })
+        setItems(buildFlatItems(structure))
+      }
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  if (analyzing) return (
+    <View style={[styles.stepContainer, styles.centerFlex]}>
+      <ActivityIndicator color={Colors.primary} size="large" />
+      <Text style={styles.analyzingTitle}>Analyzing your notes...</Text>
+      <Text style={styles.analyzingSubtitle}>Uploading, parsing, and organizing with AI</Text>
+    </View>
+  )
+
+  if (error) return (
+    <View style={[styles.stepContainer, styles.centerFlex]}>
+      <Ionicons name="warning-outline" size={40} color={Colors.error} />
+      <Text style={styles.analyzingTitle}>Analysis failed</Text>
+      <Text style={styles.analyzingSubtitle}>{error}</Text>
+      <TouchableOpacity style={styles.retryBtn} onPress={runAnalysis}>
+        <Text style={styles.retryBtnText}>Try Again</Text>
+      </TouchableOpacity>
+    </View>
+  )
+
+  return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: Spacing.xl }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.stepContainer}>
+          <TouchableOpacity onPress={onBack} style={styles.backLink}>
+            <Ionicons name="arrow-back" size={16} color={Colors.textSecondary} />
+            <Text style={styles.backLinkText}>Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.uploadTitle}>Organize materials</Text>
+          <Text style={styles.organizeSubtitle}>Drag to arrange your notes into folders, topics, and subtopics.</Text>
+        </View>
+        <View style={styles.stepContainer}>
+          <OrganizeList items={items} onChange={setItems} />
+        </View>
+      </ScrollView>
+      <View style={styles.footer}>
+        <TouchableOpacity style={styles.nextBtn} onPress={() => onNext(items, tempNotes)} activeOpacity={0.8}>
+          <Text style={styles.nextBtnText}>Create</Text>
+        </TouchableOpacity>
+      </View>
+    </KeyboardAvoidingView>
+  )
+}
+
+// ─────────────────────────────────────────
+// STEP 4 — BUILDING
+// ─────────────────────────────────────────
+function StepBuilding({
+  courseDetails, organizeItems, tempNotes,
+}: {
+  courseDetails: CourseDetails
+  organizeItems: OrganizeItem[]
+  tempNotes:     TempNote[]
+}) {
+  const { user } = useSession()
+  const [status,   setStatus]   = useState('Creating course...')
+  const [error,    setError]    = useState<string | null>(null)
+  const [progress, setProgress] = useState(0)
+
+  useEffect(() => {
+    if (!user) return
+    build()
+  }, [user])
+
+  const update = async (msg: string, pct: number) => {
+    setStatus(msg); setProgress(pct)
+    await new Promise(r => setTimeout(r, 300))
+  }
+
+  const build = async () => {
+    if (!user) return
+    try {
+      await update('Creating course...', 5)
+
+      const { data: course, error: courseErr } = await supabase
+        .from('courses')
+        .insert({
+          user_id:      user.id,
+          title:        courseDetails.name,
+          emoji:        courseDetails.icon,
+          color:        courseDetails.color,
+          course_group: courseDetails.courseGroup || null,
+          description:  null,
+        })
+        .select('id')
+        .single()
+      if (courseErr) throw courseErr
+      const courseId = course.id
+
+      // Always create one hidden default section for unorganized topics
+      const { data: defaultSection, error: defaultSecErr } = await supabase
+        .from('sections')
+        .insert({ course_id: courseId, title: 'General', order_index: 0, is_default: true })
+        .select('id')
+        .single()
+      if (defaultSecErr) throw defaultSecErr
+
+      const total = organizeItems.length
+      let done = 0
+
+      // Walk the flat list, tracking current folder/topic context by depth
+      let currentSectionId = defaultSection.id
+      let sectionOrderIndex = 1
+      let lessonOrderIndex = 0
+      let currentLessonId: string | null = null
+      let subOrderIndex = 0
+
+      for (const item of organizeItems) {
+        await update(`Creating "${item.title || 'item'}"...`, 10 + Math.round((done / total) * 75))
+
+        if (item.kind === 'folder') {
+          const { data: section, error: secErr } = await supabase
+            .from('sections')
+            .insert({ course_id: courseId, title: item.title || 'Untitled folder', order_index: sectionOrderIndex++, is_default: false })
+            .select('id')
+            .single()
+          if (secErr) throw secErr
+          currentSectionId = section.id
+          lessonOrderIndex = 0
+          currentLessonId = null
+        }
+
+        else if (item.kind === 'topic') {
+          const { data: lesson, error: lesErr } = await supabase
+            .from('lessons')
+            .insert({ section_id: currentSectionId, title: item.title || 'Untitled topic', order_index: lessonOrderIndex++ })
+            .select('id')
+            .single()
+          if (lesErr) throw lesErr
+          currentLessonId = lesson.id
+          subOrderIndex = 0
+
+          if (item.fileIndex !== undefined) {
+            const note = tempNotes.find(n => n.file_index === item.fileIndex)
+            if (note) {
+              const { error: noteErr } = await supabase
+                .from('notes')
+                .insert({
+                  lesson_id: lesson.id, sub_lesson_id: null,
+                  file_name: note.file_name, file_type: note.file_type,
+                  s3_key: note.s3_key, parsed_text: note.parsed_text,
+                })
+              if (noteErr) throw noteErr
+            }
+          }
+        }
+
+        else if (item.kind === 'subtopic' && currentLessonId) {
+          const { data: sub, error: subErr } = await supabase
+            .from('sub_lessons')
+            .insert({ lesson_id: currentLessonId, title: item.title || 'Untitled subtopic', order_index: subOrderIndex++ })
+            .select('id')
+            .single()
+          if (subErr) throw subErr
+
+          if (item.fileIndex !== undefined) {
+            const note = tempNotes.find(n => n.file_index === item.fileIndex)
+            if (note) {
+              const { error: noteErr } = await supabase
+                .from('notes')
+                .insert({
+                  lesson_id: null, sub_lesson_id: sub.id,
+                  file_name: note.file_name, file_type: note.file_type,
+                  s3_key: note.s3_key, parsed_text: note.parsed_text,
+                })
+              if (noteErr) throw noteErr
+            }
+          }
+        }
+
+        done++
+      }
+
+      await update('Finishing up...', 95)
+      setProgress(100); setStatus('Done! 🎉')
+      await new Promise(r => setTimeout(r, 600))
+
+      router.replace(`/course/${courseId}`)
+    } catch (err: any) {
+      setError(err.message)
+    }
+  }
+
+  if (error) return (
+    <View style={[styles.stepContainer, styles.centerFlex]}>
+      <Ionicons name="warning-outline" size={40} color={Colors.error} />
+      <Text style={styles.analyzingTitle}>Something went wrong</Text>
+      <Text style={styles.analyzingSubtitle}>{error}</Text>
+    </View>
+  )
+
+  return (
+    <View style={[styles.stepContainer, styles.centerFlex]}>
+      <Text style={{ fontSize: 48 }}>{progress === 100 ? '✅' : '🏗️'}</Text>
+      <Text style={styles.analyzingTitle}>{progress === 100 ? 'Course Ready!' : 'Building your course'}</Text>
+      <Text style={styles.analyzingSubtitle}>{status}</Text>
+      <View style={styles.buildProgressTrack}>
+        <View style={[styles.buildProgressFill, { width: `${progress}%`, backgroundColor: progress === 100 ? Colors.success : Colors.primary }]} />
+      </View>
+      <Text style={styles.analyzingSubtitle}>{progress}%</Text>
+      {progress < 100 && <ActivityIndicator color={Colors.primary} style={{ marginTop: Spacing.md }} />}
+    </View>
+  )
+}
 
 // ─────────────────────────────────────────
 // MAIN SCREEN
@@ -292,6 +605,8 @@ export default function CreateCourseScreen() {
     name: '', courseGroup: '', icon: COURSE_ICONS[0], color: COURSE_COLORS[0],
   })
   const [pickedFiles, setPickedFiles] = useState<PickedFile[]>([])
+  const [organizeItems, setOrganizeItems] = useState<OrganizeItem[]>([])
+  const [tempNotes,     setTempNotes]     = useState<TempNote[]>([])
 
   const handleBack = () => {
     if (step === 0) router.back()
@@ -320,7 +635,25 @@ export default function CreateCourseScreen() {
           onNext={(files) => { setPickedFiles(files); setStep(2) }}
         />
       )}
-      {/* Step 2 (Organize) built next */}
+     {step === 2 && (
+      <StepOrganize
+        courseDetails={details}
+        files={pickedFiles}
+        onBack={() => setStep(1)}
+        onNext={(items, notes) => {
+          setOrganizeItems(items)
+          setTempNotes(notes)
+          setStep(3)
+        }}
+      />
+    )}
+    {step === 3 && (
+      <StepBuilding
+        courseDetails={details}
+        organizeItems={organizeItems}
+        tempNotes={tempNotes}
+      />
+    )}
     </View>
   )
 }
@@ -374,7 +707,7 @@ const styles = StyleSheet.create({
 backLink: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: Spacing.md },
 backLinkText: { fontSize: Typography.sm, color: Colors.textSecondary, fontWeight: Typography.medium },
 uploadHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.md },
-uploadTitle: { fontSize: Typography.xl, fontWeight: Typography.bold, color: Colors.textPrimary },
+uploadTitle: { fontSize: Typography.xl, fontWeight: Typography.bold, color: Colors.textPrimary, marginBottom: Spacing.md },
 uploadCount: { fontSize: Typography.sm, color: Colors.textMuted },
 dropzone: {
   borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.lg, backgroundColor: Colors.card,
@@ -393,4 +726,12 @@ fileName: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Color
 fileMeta: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 2 },
 nextBtnDisabled: { backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border },
 nextBtnTextDisabled: { color: Colors.textMuted },
+centerFlex: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.md },
+analyzingTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary, textAlign: 'center' },
+analyzingSubtitle: { fontSize: Typography.sm, color: Colors.textSecondary, textAlign: 'center' },
+retryBtn: { paddingVertical: Spacing.sm, paddingHorizontal: Spacing.xl, backgroundColor: Colors.primary, borderRadius: Radius.full },
+retryBtnText: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: '#fff' },
+organizeSubtitle: { fontSize: Typography.sm, color: Colors.textSecondary, marginTop: -Spacing.sm, marginBottom: Spacing.md },
+buildProgressTrack: { width: '100%', height: 6, backgroundColor: Colors.progressTrack, borderRadius: Radius.full, overflow: 'hidden', marginTop: Spacing.md },
+buildProgressFill: { height: 6, borderRadius: Radius.full },
 })

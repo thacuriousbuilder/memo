@@ -1,6 +1,6 @@
 
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useFocusEffect } from 'expo-router'
 import { supabase }       from '@/lib/supabase'
 
@@ -226,6 +226,9 @@ export function useCourseOverview(
   useFocusEffect(
     useCallback(() => { fetchCourse() }, [fetchCourse])
   )
+  useEffect(() => {
+    if (courseId && userId) fetchCourse()
+  }, [courseId, userId])
 
   return { course, loading, error, refetch: fetchCourse }
 }
