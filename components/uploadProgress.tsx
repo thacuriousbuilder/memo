@@ -1,4 +1,4 @@
-// components/UploadProgress.tsx
+
 
 import {
   View, Text, StyleSheet, Animated, Easing

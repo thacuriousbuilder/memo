@@ -1,4 +1,4 @@
-// app/course/edit/[id].tsx
+
 
 import {
     View, Text, TextInput, TouchableOpacity,

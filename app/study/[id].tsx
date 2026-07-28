@@ -4,7 +4,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator
 } from 'react-native'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLocalSearchParams, router } from 'expo-router'
 import Svg, { Circle } from 'react-native-svg'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
@@ -22,7 +22,7 @@ import {
 // TYPES
 // ─────────────────────────────────────────
 type QuizStep    = 'setup' | 'loading' | 'quiz' | 'empty'
-type QuizCount   = 5 | 10 | 15
+type QuizCount   = number
 type AnswerState = 'default' | 'correct' | 'wrong'
 
 const LABELS = ['A', 'B', 'C', 'D']
@@ -476,6 +476,7 @@ export default function StudySessionScreen() {
     mode:     string
     title:    string
     noteIds?: string
+    presetCount?: string
   }>()
 
   const { user }  = useSession()
@@ -483,10 +484,16 @@ export default function StudySessionScreen() {
   const title     = params.title ?? 'Quiz'
   const id        = params.id ?? ''
 
-  const [step,      setStep]      = useState<QuizStep>('setup')
+  const [step, setStep] = useState<QuizStep>(params.presetCount ? 'loading' : 'setup')
   const [questions, setQuestions] = useState<QuizQuestion[]>([])
   const [saving,    setSaving]    = useState(false)
-
+  
+  useEffect(() => {
+    if (params.presetCount && user) {
+      handleStart(Number(params.presetCount) as QuizCount)
+    }
+  }, [user])
+  
   const handleStart = async (count: QuizCount) => {
     if (!user) return
     try {

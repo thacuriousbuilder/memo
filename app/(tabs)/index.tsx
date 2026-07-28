@@ -1,16 +1,15 @@
-
-
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, LayoutAnimation, Platform, UIManager,
-  Dimensions, ActivityIndicator
+  Dimensions, ActivityIndicator, Alert
 } from 'react-native'
 import { useState }    from 'react'
 import { router }      from 'expo-router'
-import { Ionicons }    from '@expo/vector-icons'
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
 import { useSession }  from '@/hooks/useSession'
-import { useDashboard, TodayCourse, UpcomingExam, RecentSession } from '@/hooks/useDashboard'
+import { useDashboard, PlanItem, UpcomingExam, WeekPlanItem } from '@/hooks/useDashboard'
+import { resolveReminderNoteIds } from '@/hooks/useReminders'
 
 if (Platform.OS === 'android') {
   UIManager.setLayoutAnimationEnabledExperimental?.(true)
@@ -27,9 +26,10 @@ const ROW_H        = 48
 
 const DAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 const TIME_SLOTS = [
+  '12AM', '1AM', '2AM', '3AM', '4AM', '5AM',
   '6AM', '7AM', '8AM', '9AM', '10AM', '11AM',
   '12PM', '1PM', '2PM', '3PM', '4PM', '5PM',
-  '6PM', '7PM', '8PM', '9PM',
+  '6PM', '7PM', '8PM', '9PM', '10PM', '11PM'
 ]
 
 // ─────────────────────────────────────────
@@ -40,7 +40,6 @@ function getDaysLabel(daysLeft: number): string {
   if (daysLeft === 1) return 'Tomorrow'
   return `${daysLeft} days`
 }
-
 function getDaysColor(daysLeft: number): string {
   if (daysLeft <= 3) return Colors.error
   if (daysLeft <= 7) return Colors.warning
@@ -48,15 +47,49 @@ function getDaysColor(daysLeft: number): string {
 }
 
 // ─────────────────────────────────────────
+// SHARED: start a plan item
+// ─────────────────────────────────────────
+async function startPlanItem(item: PlanItem) {
+  if (item.sessionType === 'blurt') {
+    Alert.alert('Coming soon', 'Blurt sessions aren\'t available yet.')
+    return
+  }
+  try {
+    if (item.scopeType === 'all') {
+      router.push({
+        pathname: '/study/[id]',
+        params: {
+          id: item.courseId, mode: 'course', title: item.label,
+          presetCount: String(item.questionCount ?? 10),
+        },
+      })
+      return
+    }
+    const noteIds = await resolveReminderNoteIds(item.scopeType, item.scopeId)
+    if (!noteIds.length) {
+      Alert.alert('No materials', 'This reminder\'s materials couldn\'t be found.')
+      return
+    }
+    router.push({
+      pathname: '/study/[id]',
+      params: {
+        id: item.courseId, mode: 'custom', title: item.label,
+        noteIds: JSON.stringify(noteIds),
+        presetCount: String(item.questionCount ?? 10),
+      },
+    })
+  } catch (err: any) {
+    Alert.alert('Error', err.message)
+  }
+}
+
+// ─────────────────────────────────────────
 // NEXT UP TODAY
 // ─────────────────────────────────────────
-function NextUpCard({ data }: { data: ReturnType<typeof useDashboard>['data'] }) {
-  if (!data?.next_up) return null
-
-  const item        = data.next_up
-  const total       = data.today_courses.length
-  const done        = data.today_courses.filter(c => c.done).length
-  const pct         = total > 0 ? Math.round((done / total) * 100) : 0
+function NextUpCard({ item, laterCount }: { item: PlanItem | null; laterCount: number }) {
+  if (!item) return null
+  const total = laterCount + 1
+  const done  = 0 // next_up is by definition not-done
 
   return (
     <View style={styles.section}>
@@ -69,45 +102,32 @@ function NextUpCard({ data }: { data: ReturnType<typeof useDashboard>['data'] })
 
       <View style={styles.nextCard}>
         <View style={styles.nextCardHeader}>
-          <Text style={styles.nextEmoji}>{item.course_emoji}</Text>
+          <View style={[styles.nextIconBadge, { backgroundColor: (item.courseColor ?? Colors.primary) + '22' }]}>
+            <MaterialCommunityIcons name={item.courseEmoji as any} size={28} color={item.courseColor ?? Colors.primary} />
+          </View>
           <View style={styles.nextInfo}>
-            <Text style={styles.nextTitle}>{item.title}</Text>
-            <Text style={styles.nextDesc}>{item.course_title}</Text>
+            <Text style={styles.nextTitle}>{item.label}</Text>
+            <Text style={styles.nextDesc}>{item.courseTitle}</Text>
           </View>
         </View>
 
         <Text style={styles.nextMeta}>
-          {item.questions > 0
-            ? `${item.questions} questions`
-            : 'No questions yet'
-          }
+          {item.sessionType === 'blurt'
+            ? 'Free-recall session'
+            : item.questionCount ? `${item.questionCount} questions` : 'Quiz'}
+          {' · '}{item.time}
         </Text>
 
-        <TouchableOpacity
-          style={styles.startButton}
-          activeOpacity={0.8}
-          onPress={() => router.push({
-            pathname: '/study/[id]',
-            params: {
-              id:    item.id,
-              mode:  item.mode,
-              title: item.title,
-            },
-          })}
-        >
+        <TouchableOpacity style={styles.startButton} activeOpacity={0.8} onPress={() => startPlanItem(item)}>
           <Text style={styles.startButtonText}>Start</Text>
         </TouchableOpacity>
 
-        {total > 0 && (
-          <View style={styles.progressRow}>
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${pct}%` }]} />
-            </View>
-            <Text style={styles.progressLabel}>
-              {done} of {total} done
-            </Text>
+        <View style={styles.progressRow}>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${(done / total) * 100}%` }]} />
           </View>
-        )}
+          <Text style={styles.progressLabel}>{done} of {total} done</Text>
+        </View>
       </View>
     </View>
   )
@@ -116,19 +136,9 @@ function NextUpCard({ data }: { data: ReturnType<typeof useDashboard>['data'] })
 // ─────────────────────────────────────────
 // LATER TODAY
 // ─────────────────────────────────────────
-function LaterTodaySection({
-  courses,
-  nextUpId,
-}: {
-  courses:   TodayCourse[]
-  nextUpId?: string
-}) {
+function LaterTodaySection({ items }: { items: PlanItem[] }) {
   const [expanded, setExpanded] = useState(true)
-
-  // Exclude the next up lesson
-  const later = courses.filter(c => c.lesson_id !== nextUpId)
-
-  if (later.length === 0) return null
+  if (items.length === 0) return null
 
   const toggle = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
@@ -137,63 +147,35 @@ function LaterTodaySection({
 
   return (
     <View style={styles.section}>
-      <TouchableOpacity
-        style={styles.sectionHeader}
-        onPress={toggle}
-        activeOpacity={0.8}
-      >
+      <TouchableOpacity style={styles.sectionHeader} onPress={toggle} activeOpacity={0.8}>
         <Text style={styles.sectionTitle}>LATER TODAY</Text>
-        <Ionicons
-          name={expanded ? 'chevron-up' : 'chevron-down'}
-          size={16}
-          color={Colors.textMuted}
-        />
+        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={Colors.textMuted} />
       </TouchableOpacity>
 
       {expanded && (
         <View style={styles.list}>
-          {later.map((item, index) => (
+          {items.map((item, index) => (
             <TouchableOpacity
-              key={item.lesson_id}
-              style={[
-                styles.row,
-                index < later.length - 1 && styles.rowBorder,
-              ]}
+              key={item.slotId}
+              style={[styles.row, index < items.length - 1 && styles.rowBorder]}
               activeOpacity={item.done ? 1 : 0.8}
               disabled={item.done}
-              onPress={() => router.push({
-                pathname: '/study/[id]',
-                params: {
-                  id:    item.lesson_id,
-                  mode:  'lesson',
-                  title: item.title,
-                },
-              })}
+              onPress={() => startPlanItem(item)}
             >
-              <Text style={[
-                styles.rowEmoji,
-                item.done && { opacity: 0.4 },
-              ]}>
-                {item.emoji}
-              </Text>
+              <View style={[styles.rowIconBadge, { backgroundColor: (item.courseColor ?? Colors.primary) + '22' }, item.done && { opacity: 0.4 }]}>
+                <MaterialCommunityIcons name={item.courseEmoji as any} size={20} color={item.courseColor ?? Colors.primary} />
+              </View>
               <View style={styles.rowInfo}>
-                <Text style={[
-                  styles.rowTitle,
-                  item.done && styles.doneText,
-                ]}>
-                  {item.title}
-                </Text>
-                {!item.done && item.questions > 0 && (
+                <Text style={[styles.rowTitle, item.done && styles.doneText]}>{item.label}</Text>
+                {!item.done && (
                   <Text style={styles.rowMeta}>
-                    {item.questions} questions
+                    {item.time}{item.questionCount ? ` · ${item.questionCount} questions` : ''}
                   </Text>
                 )}
               </View>
-              {item.done ? (
-                <Ionicons name="checkmark" size={20} color={Colors.success} />
-              ) : (
-                <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-              )}
+              {item.done
+                ? <Ionicons name="checkmark" size={20} color={Colors.success} />
+                : <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />}
             </TouchableOpacity>
           ))}
         </View>
@@ -207,54 +189,37 @@ function LaterTodaySection({
 // ─────────────────────────────────────────
 function UpcomingTestsSection({ exams }: { exams: UpcomingExam[] }) {
   const [expanded, setExpanded] = useState(false)
+  if (exams.length === 0) return null
 
   const toggle = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     setExpanded(prev => !prev)
   }
-
   const urgentCount = exams.filter(e => e.days_left <= 3).length
-
-  if (exams.length === 0) return null
 
   return (
     <View style={styles.section}>
-      <TouchableOpacity
-        style={styles.sectionHeader}
-        onPress={toggle}
-        activeOpacity={0.8}
-      >
+      <TouchableOpacity style={styles.sectionHeader} onPress={toggle} activeOpacity={0.8}>
         <Text style={styles.sectionTitle}>UPCOMING TESTS</Text>
         <View style={styles.sectionHeaderRight}>
           {urgentCount > 0 && <View style={styles.urgentDot} />}
           <Text style={styles.sectionCount}>{exams.length} total</Text>
-          <Ionicons
-            name={expanded ? 'chevron-up' : 'chevron-down'}
-            size={16}
-            color={Colors.textMuted}
-          />
+          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={Colors.textMuted} />
         </View>
       </TouchableOpacity>
 
       {expanded && (
-        <View style={styles.list}>
-          {exams.map((exam, index) => (
-            <View
-              key={exam.id}
-              style={[
-                styles.row,
-                index < exams.length - 1 && styles.rowBorder,
-              ]}
-            >
-              <Text style={styles.rowEmoji}>{exam.emoji}</Text>
+        <View style={styles.cardList}>
+          {exams.map((exam) => (
+            <View key={exam.id} style={styles.cardRow}>
+              <View style={styles.rowIconBadge}>
+                <MaterialCommunityIcons name={exam.emoji as any} size={20} color={Colors.primary} />
+              </View>
               <View style={styles.rowInfo}>
                 <Text style={styles.rowTitle}>{exam.title}</Text>
                 <Text style={styles.rowMeta}>{exam.course}</Text>
               </View>
-              <Text style={[
-                styles.testDays,
-                { color: getDaysColor(exam.days_left) }
-              ]}>
+              <Text style={[styles.testDays, { color: getDaysColor(exam.days_left) }]}>
                 {getDaysLabel(exam.days_left)}
               </Text>
             </View>
@@ -266,75 +231,91 @@ function UpcomingTestsSection({ exams }: { exams: UpcomingExam[] }) {
 }
 
 // ─────────────────────────────────────────
-// WEEKLY SCHEDULE
+// WEEKLY SCHEDULE 
 // ─────────────────────────────────────────
-function WeeklyScheduleSection() {
-  const [expanded, setExpanded] = useState(true)
+
+const DAY_FULL_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+function todayMonFirstIndex(): number {
+  return (new Date().getDay() + 6) % 7
+}
+
+function WeeklyScheduleSection({ items }: { items: WeekPlanItem[] }) {
+  const [expanded, setExpanded]   = useState(true)
+  const [selectedDay, setSelectedDay] = useState(todayMonFirstIndex())
 
   const toggle = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     setExpanded(prev => !prev)
   }
 
+  const countsByDay = DAY_LABELS.map((_, i) => items.filter(it => it.dayIndex === i).length)
+  const dayItems = items.filter(it => it.dayIndex === selectedDay)
+  const today = todayMonFirstIndex()
+
   return (
     <View style={styles.section}>
-      <TouchableOpacity
-        style={styles.sectionHeader}
-        onPress={toggle}
-        activeOpacity={0.8}
-      >
+      <TouchableOpacity style={styles.sectionHeader} onPress={toggle} activeOpacity={0.8}>
         <View style={styles.sectionHeaderLeft}>
-          <Ionicons
-            name="calendar-outline"
-            size={14}
-            color={Colors.textSecondary}
-          />
-          <Text style={[styles.sectionTitle, { marginLeft: Spacing.xs }]}>
-            WEEKLY SCHEDULE
-          </Text>
+          <Ionicons name="calendar-outline" size={14} color={Colors.textSecondary} />
+          <Text style={[styles.sectionTitle, { marginLeft: Spacing.xs }]}>WEEKLY SCHEDULE</Text>
         </View>
-        <Ionicons
-          name={expanded ? 'chevron-up' : 'chevron-down'}
-          size={16}
-          color={Colors.textMuted}
-        />
+        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={Colors.textMuted} />
       </TouchableOpacity>
 
       {expanded && (
-        <View style={styles.calendarCard}>
-          <View style={styles.calendarHeader}>
-            <View style={{ width: TIME_COL_W }} />
-            {DAY_LABELS.map((day, i) => (
-              <View key={i} style={[styles.calendarDayCol, { width: COL_W }]}>
-                <Text style={styles.calendarDayText}>{day}</Text>
+        <>
+          <View style={styles.dayChipRow}>
+            {DAY_LABELS.map((label, i) => {
+              const isSelected = i === selectedDay
+              const isToday = i === today
+              return (
+                <TouchableOpacity
+                  key={i}
+                  style={[
+                    styles.dayChip,
+                    isSelected && styles.dayChipSelected,
+                    !isSelected && isToday && styles.dayChipToday,
+                  ]}
+                  onPress={() => setSelectedDay(i)}
+                >
+                  <Text style={[styles.dayChipLabel, isSelected && styles.dayChipLabelSelected]}>{label}</Text>
+                  <View style={[styles.dayChipCount, isSelected && styles.dayChipCountSelected]}>
+                    <Text style={[styles.dayChipCountText, isSelected && styles.dayChipCountTextSelected]}>
+                      {countsByDay[i]}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+
+          <Text style={styles.dayHeading}>{DAY_FULL_NAMES[selectedDay]}</Text>
+
+          {dayItems.length === 0 ? (
+            <View style={styles.emptyDayBox}>
+              <Text style={styles.emptyDayText}>Nothing scheduled this day.</Text>
+            </View>
+          ) : (
+            <View style={styles.cardList}>
+            {dayItems.map((item) => (
+              <View key={item.slotId + item.reminderId} style={styles.cardRow}>
+                <View style={[styles.rowIconBadge, { backgroundColor: (item.courseColor ?? Colors.primary) + '22' }]}>
+                  <MaterialCommunityIcons name={item.courseEmoji as any} size={20} color={item.courseColor ?? Colors.primary} />
+                </View>
+                <View style={styles.rowInfo}>
+                  <Text style={styles.rowTitle} numberOfLines={1}>{item.label}</Text>
+                  <Text style={styles.rowMeta} numberOfLines={1}>
+                    {item.courseTitle}
+                    {item.sessionType === 'blurt' ? ' · Free-recall' : ` · ${item.questionCount ?? '—'} questions`}
+                  </Text>
+                </View>
+                <Text style={styles.dayItemTime}>{item.time}</Text>
               </View>
             ))}
           </View>
-          <View style={styles.calendarDivider} />
-          <ScrollView
-            style={styles.calendarScroll}
-            showsVerticalScrollIndicator={false}
-            nestedScrollEnabled
-          >
-            {TIME_SLOTS.map((time, timeIdx) => (
-              <View key={time} style={styles.calendarRow}>
-                <View style={styles.timeLabel}>
-                  <Text style={styles.timeLabelText}>{time}</Text>
-                </View>
-                {DAY_LABELS.map((_, dayIdx) => (
-                  <View
-                    key={dayIdx}
-                    style={[
-                      styles.calendarCell,
-                      { width: COL_W },
-                      dayIdx > 0 && styles.calendarCellBorder,
-                    ]}
-                  />
-                ))}
-              </View>
-            ))}
-          </ScrollView>
-        </View>
+          )}
+        </>
       )}
     </View>
   )
@@ -348,14 +329,8 @@ function EmptyHome() {
     <View style={styles.emptyState}>
       <Text style={styles.emptyEmoji}>📚</Text>
       <Text style={styles.emptyTitle}>Nothing scheduled yet</Text>
-      <Text style={styles.emptySub}>
-        Create a course and upload notes to get started.
-      </Text>
-      <TouchableOpacity
-        style={styles.emptyButton}
-        onPress={() => router.push('/(tabs)/courses')}
-        activeOpacity={0.8}
-      >
+      <Text style={styles.emptySub}>Set a study reminder to see your plan here.</Text>
+      <TouchableOpacity style={styles.emptyButton} onPress={() => router.push('/(tabs)/courses')} activeOpacity={0.8}>
         <Text style={styles.emptyButtonText}>Go to Courses</Text>
       </TouchableOpacity>
     </View>
@@ -366,8 +341,8 @@ function EmptyHome() {
 // MAIN SCREEN
 // ─────────────────────────────────────────
 export default function HomeScreen() {
-  const { user }              = useSession()
-  const { data, loading, error } = useDashboard(user?.id ?? null)
+  const { user } = useSession()
+  const { data, loading } = useDashboard(user?.id ?? null)
 
   if (loading) return (
     <View style={[styles.root, styles.center]}>
@@ -375,46 +350,36 @@ export default function HomeScreen() {
     </View>
   )
 
-  const hasContent = data && (
-    data.next_up ||
-    data.today_courses.length > 0 ||
-    data.upcoming_exams.length > 0
-  )
+  const hasContent = data && (data.next_up || data.later_today.length > 0 || data.upcoming_exams.length > 0)
 
   return (
-    <ScrollView
-      style={styles.root}
-      contentContainerStyle={styles.container}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Today's Plan</Text>
+    <View style={styles.root}>
+     <View style={styles.fixedHeader}>
+        <View style={styles.logoRow}>
+          <View style={styles.logoBadge}>
+            <MaterialCommunityIcons name="brain" size={20} color={Colors.primary} />
+          </View>
+          <Text style={styles.logoText}>MEMO</Text>
+        </View>
         <View style={styles.streakBadge}>
           <Text style={styles.streakFire}>🔥</Text>
           <Text style={styles.streakCount}>{data?.streak ?? 0}</Text>
         </View>
       </View>
 
-      {!hasContent ? (
-        <EmptyHome />
-      ) : (
-        <>
-          <NextUpCard data={data} />
-
-          <LaterTodaySection
-            courses={data?.today_courses ?? []}
-            nextUpId={data?.next_up?.id}
-          />
-
-          <UpcomingTestsSection
-            exams={data?.upcoming_exams ?? []}
-          />
-
-          <WeeklyScheduleSection />
-        </>
-      )}
-    </ScrollView>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        {!hasContent ? (
+          <EmptyHome />
+        ) : (
+          <>
+            <NextUpCard item={data?.next_up ?? null} laterCount={data?.later_today.length ?? 0} />
+            <LaterTodaySection items={data?.later_today ?? []} />
+            <UpcomingTestsSection exams={data?.upcoming_exams ?? []} />
+            <WeeklyScheduleSection items={data?.week_plan ?? []} />
+          </>
+        )}
+      </ScrollView>
+    </View>
   )
 }
 
@@ -422,264 +387,105 @@ export default function HomeScreen() {
 // STYLES
 // ─────────────────────────────────────────
 const styles = StyleSheet.create({
-  root: {
-    flex:            1,
+  root: { flex: 1, backgroundColor: Colors.background },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  fixedHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: Spacing.base, paddingTop: Spacing.xl + 32, paddingBottom: Spacing.base,
     backgroundColor: Colors.background,
   },
-  center: {
-    flex:           1,
-    alignItems:     'center',
-    justifyContent: 'center',
-  },
   container: {
-    paddingHorizontal: Spacing.base,
-    paddingTop:        Spacing.xl + 32,
-    paddingBottom:     Spacing.xxxl,
-    gap:               Spacing.xl,
+    paddingHorizontal: Spacing.base, paddingBottom: Spacing.xxxl, gap: Spacing.xl,
   },
-
-  // Header
-  header: {
-    flexDirection:  'row',
-    justifyContent: 'space-between',
-    alignItems:     'center',
-  },
-  headerTitle: {
-    fontSize:   Typography.xxl,
-    fontWeight: Typography.bold,
-    color:      Colors.textPrimary,
-  },
-  streakBadge: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    gap:               4,
-    backgroundColor:   Colors.card,
-    borderRadius:      Radius.full,
-    paddingVertical:   6,
-    paddingHorizontal: Spacing.md,
-    borderWidth:       1,
-    borderColor:       Colors.border,
-  },
-  streakFire:  { fontSize: 16 },
-  streakCount: {
-    fontSize:   Typography.sm,
-    fontWeight: Typography.bold,
-    color:      Colors.textPrimary,
-  },
-
-  // Section
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerTitle: { fontSize: Typography.xxl, fontWeight: Typography.bold, color: Colors.textPrimary },
+  streakBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: Colors.card, borderRadius: Radius.full, paddingVertical: 6, paddingHorizontal: Spacing.md, borderWidth: 1, borderColor: Colors.border },
+  streakFire: { fontSize: 16 },
+  streakCount: { fontSize: Typography.sm, fontWeight: Typography.bold, color: Colors.textPrimary },
   section: { gap: Spacing.md },
-  sectionHeader: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'space-between',
-  },
-  sectionHeaderLeft: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           Spacing.xs,
-  },
-  sectionHeaderRight: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           Spacing.sm,
-  },
-  sectionTitle: {
-    fontSize:      Typography.xs,
-    fontWeight:    Typography.bold,
-    color:         Colors.textSecondary,
-    letterSpacing: 1,
-  },
-  sectionCount: {
-    fontSize: Typography.xs,
-    color:    Colors.textMuted,
-  },
-  dot: {
-    width:           6,
-    height:          6,
-    borderRadius:    3,
-    backgroundColor: Colors.primary,
-  },
-  urgentDot: {
-    width:           6,
-    height:          6,
-    borderRadius:    3,
-    backgroundColor: Colors.error,
-  },
-
-  // Next Up
-  nextCard: {
-    ...CardBase,
-    padding: Spacing.base,
-    gap:     Spacing.md,
-  },
-  nextCardHeader: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           Spacing.md,
-  },
-  nextEmoji: { fontSize: 36 },
-  nextInfo:  { flex: 1 },
-  nextTitle: {
-    fontSize:   Typography.xl,
-    fontWeight: Typography.bold,
-    color:      Colors.textPrimary,
-  },
-  nextDesc: {
-    fontSize:  Typography.sm,
-    color:     Colors.textSecondary,
-    marginTop: 2,
-  },
-  nextMeta: {
-    fontSize: Typography.sm,
-    color:    Colors.textMuted,
-  },
-  startButton: {
-    backgroundColor: Colors.primary,
-    borderRadius:    Radius.md,
-    paddingVertical: Spacing.md,
-    alignItems:      'center',
-  },
-  startButtonText: {
-    fontSize:   Typography.base,
-    fontWeight: Typography.semibold,
-    color:      Colors.textInverse,
-  },
-  progressRow: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           Spacing.md,
-  },
-  progressTrack: {
-    flex:            1,
-    height:          4,
-    backgroundColor: Colors.progressTrack,
-    borderRadius:    Radius.full,
-    overflow:        'hidden',
-  },
-  progressFill: {
-    height:          4,
-    backgroundColor: Colors.primary,
-    borderRadius:    Radius.full,
-  },
-  progressLabel: {
-    fontSize:   Typography.xs,
-    color:      Colors.textMuted,
-    flexShrink: 0,
-  },
-
-  // List
-  list: {
-    borderTopWidth: 1,
-    borderTopColor: Colors.border + '66',
-  },
-  row: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    paddingVertical: Spacing.md,
-    gap:             Spacing.md,
-  },
-  rowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border + '66',
-  },
-  rowEmoji: { fontSize: 24 },
-  rowInfo:  { flex: 1 },
-  rowTitle: {
-    fontSize:   Typography.base,
-    fontWeight: Typography.medium,
-    color:      Colors.textPrimary,
-  },
-  rowMeta: {
-    fontSize:  Typography.xs,
-    color:     Colors.textMuted,
-    marginTop: 2,
-  },
-  doneText: {
-    textDecorationLine: 'line-through',
-    color:              Colors.textMuted,
-  },
-  testDays: {
-    fontSize:   Typography.sm,
-    fontWeight: Typography.semibold,
-  },
-
-  // Calendar
-  calendarCard: {
-    ...CardBase,
-    padding:  Spacing.sm,
-    overflow: 'hidden',
-  },
-  calendarHeader: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    paddingBottom: Spacing.sm,
-  },
-  calendarDayCol:  { alignItems: 'center' },
-  calendarDayText: {
-    fontSize:   Typography.xs,
-    fontWeight: Typography.semibold,
-    color:      Colors.textSecondary,
-  },
-  calendarDivider: {
-    height:          1,
-    backgroundColor: Colors.border,
-    marginBottom:    Spacing.xs,
-  },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sectionHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
+  sectionHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  sectionTitle: { fontSize: Typography.xs, fontWeight: Typography.bold, color: Colors.textSecondary, letterSpacing: 1 },
+  sectionCount: { fontSize: Typography.xs, color: Colors.textMuted },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.primary },
+  urgentDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.error },
+  nextCard: { ...CardBase, padding: Spacing.base, gap: Spacing.md },
+  nextCardHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  nextIconBadge: { width: 52, height: 52, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
+  nextInfo: { flex: 1 },
+  nextTitle: { fontSize: Typography.xl, fontWeight: Typography.bold, color: Colors.textPrimary },
+  nextDesc: { fontSize: Typography.sm, color: Colors.textSecondary, marginTop: 2 },
+  nextMeta: { fontSize: Typography.sm, color: Colors.textMuted },
+  startButton: { backgroundColor: Colors.primary, borderRadius: Radius.md, paddingVertical: Spacing.md, alignItems: 'center' },
+  startButtonText: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textInverse },
+  progressRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  progressTrack: { flex: 1, height: 4, backgroundColor: Colors.progressTrack, borderRadius: Radius.full, overflow: 'hidden' },
+  progressFill: { height: 4, backgroundColor: Colors.primary, borderRadius: Radius.full },
+  progressLabel: { fontSize: Typography.xs, color: Colors.textMuted, flexShrink: 0 },
+  list: { borderTopWidth: 1, borderTopColor: Colors.border + '66' },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing.md, gap: Spacing.md },
+  rowBorder: { borderBottomWidth: 1, borderBottomColor: Colors.border + '66' },
+  rowIconBadge: { width: 36, height: 36, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
+  rowInfo: { flex: 1 },
+  rowTitle: { fontSize: Typography.base, fontWeight: Typography.medium, color: Colors.textPrimary },
+  rowMeta: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 2 },
+  doneText: { textDecorationLine: 'line-through', color: Colors.textMuted },
+  testDays: { fontSize: Typography.sm, fontWeight: Typography.semibold },
+  calendarCard: { ...CardBase, padding: Spacing.sm, overflow: 'hidden' },
+  calendarHeader: { flexDirection: 'row', alignItems: 'center', paddingBottom: Spacing.sm },
+  calendarDayCol: { alignItems: 'center' },
+  calendarDayText: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.textSecondary },
+  calendarDivider: { height: 1, backgroundColor: Colors.border, marginBottom: Spacing.xs },
   calendarScroll: { maxHeight: ROW_H * 8 },
-  calendarRow: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    height:        ROW_H,
-  },
-  timeLabel: {
-    width:      TIME_COL_W,
-    alignItems: 'flex-start',
-    paddingLeft: 2,
-  },
-  timeLabelText: {
-    fontSize: 10,
-    color:    Colors.textMuted,
-  },
-  calendarCell: {
-    height:         ROW_H,
-    alignItems:     'center',
-    justifyContent: 'center',
-    borderTopWidth: 1,
-    borderTopColor: Colors.border + '44',
-  },
-  calendarCellBorder: {
-    borderLeftWidth: 1,
-    borderLeftColor: Colors.border + '44',
-  },
-
-  // Empty
-  emptyState: {
-    alignItems: 'center',
-    paddingTop: Spacing.xxxl,
-    gap:        Spacing.md,
-  },
+  calendarRow: { flexDirection: 'row', alignItems: 'center', height: ROW_H },
+  timeLabel: { width: TIME_COL_W, alignItems: 'flex-start', paddingLeft: 2 },
+  timeLabelText: { fontSize: 10, color: Colors.textMuted },
+  calendarCell: { height: ROW_H, alignItems: 'center', justifyContent: 'center', borderTopWidth: 1, borderTopColor: Colors.border + '44' },
+  calendarCellBorder: { borderLeftWidth: 1, borderLeftColor: Colors.border + '44' },
+  emptyState: { alignItems: 'center', paddingTop: Spacing.xxxl, gap: Spacing.md },
   emptyEmoji: { fontSize: 48 },
-  emptyTitle: {
-    fontSize:   Typography.lg,
-    fontWeight: Typography.bold,
-    color:      Colors.textPrimary,
+  emptyTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
+  emptySub: { fontSize: Typography.sm, color: Colors.textSecondary, textAlign: 'center' },
+  emptyButton: { backgroundColor: Colors.primary, borderRadius: Radius.full, paddingVertical: Spacing.sm, paddingHorizontal: Spacing.xl, marginTop: Spacing.sm },
+  emptyButtonText: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textInverse },
+  scheduleBadge: {
+    width: 28, height: 28, borderRadius: Radius.full,
+    alignItems: 'center', justifyContent: 'center',
   },
-  emptySub: {
-    fontSize:  Typography.sm,
-    color:     Colors.textSecondary,
-    textAlign: 'center',
-  },
-  emptyButton: {
-    backgroundColor:   Colors.primary,
-    borderRadius:      Radius.full,
-    paddingVertical:   Spacing.sm,
-    paddingHorizontal: Spacing.xl,
-    marginTop:         Spacing.sm,
-  },
-  emptyButtonText: {
-    fontSize:   Typography.sm,
-    fontWeight: Typography.semibold,
-    color:      Colors.textInverse,
-  },
+dayChipRow: { flexDirection: 'row', justifyContent: 'space-between' },
+dayChip: {
+  alignItems: 'center', gap: 6, paddingVertical: Spacing.sm, paddingHorizontal: 4,
+  borderRadius: Radius.lg, minWidth: 40,
+},
+dayChipSelected: { backgroundColor: Colors.primary },
+dayChipToday: { backgroundColor: Colors.primaryMuted },
+dayChipLabel: { fontSize: 10, fontWeight: Typography.bold, color: Colors.textSecondary, letterSpacing: 0.3 },
+dayChipLabelSelected: { color: '#fff' },
+dayChipCount: {
+  width: 24, height: 24, borderRadius: Radius.full, backgroundColor: Colors.cardElevated,
+  alignItems: 'center', justifyContent: 'center',
+},
+dayChipCountSelected: { backgroundColor: 'rgba(255,255,255,0.25)' },
+dayChipCountText: { fontSize: Typography.xs, fontWeight: Typography.bold, color: Colors.textSecondary },
+dayChipCountTextSelected: { color: '#fff' },
+dayHeading: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary, marginTop: Spacing.sm },
+dayItemTime: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textSecondary },
+emptyDayBox: { ...CardBase, alignItems: 'center', paddingVertical: Spacing.lg, borderStyle: 'dashed' },
+emptyDayText: { fontSize: Typography.sm, color: Colors.textMuted },
+cardList: { gap: Spacing.sm },
+cardRow: {
+  ...CardBase,
+  flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
+  padding: Spacing.md,
+},
+logoRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+logoBadge: {
+  width: 32, height: 32, borderRadius: Radius.md, backgroundColor: Colors.primaryMuted,
+  alignItems: 'center', justifyContent: 'center',
+},
+logoText: {
+  fontSize: Typography.xl, fontWeight: Typography.extrabold, color: Colors.textPrimary,
+  letterSpacing: 1,
+},
 })

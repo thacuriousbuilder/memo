@@ -11,6 +11,7 @@ import { signOut }        from '@/lib/supabase'
 import { useSession }     from '@/hooks/useSession'
 import { useDashboard }   from '@/hooks/useDashboard'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
+import { useCourses } from '@/hooks/useCourses'
 
 // ─────────────────────────────────────────
 // REUSABLE ROW
@@ -111,9 +112,14 @@ export default function ProfileScreen() {
     .slice(0, 2)
 
   // Stats from dashboard
-  const courseCount  = dashboard?.today_courses.length ?? 0
-  const completedQ   = dashboard?.week_stats.questions  ?? 0
-  const streak       = dashboard?.streak                 ?? 0
+  const todayItems = [
+    ...(dashboard?.next_up ? [dashboard.next_up] : []),
+    ...(dashboard?.later_today ?? []),
+  ]
+  const { courses } = useCourses(user?.id ?? null)
+  const courseCount = courses.length
+  const completedQ  = dashboard?.week_stats.questions ?? 0
+  const streak      = dashboard?.streak ?? 0
 
   const handleLogout = () => {
     Alert.alert('Log Out', 'Are you sure you want to log out?', [
@@ -145,8 +151,13 @@ export default function ProfileScreen() {
   )
 
   return (
+    <View style={styles.root}>
+    <View style={styles.fixedHeader}>
+      <Text style={styles.headerTitle}>Profile</Text>
+    </View>
+
     <ScrollView
-      style={styles.root}
+      style={{ flex: 1 }}
       contentContainerStyle={styles.container}
       showsVerticalScrollIndicator={false}
     >
@@ -172,7 +183,7 @@ export default function ProfileScreen() {
         </View>
         <View style={styles.statCard}>
           <Text style={styles.statValue}>{completedQ}</Text>
-          <Text style={styles.statLabel}>Questions</Text>
+          <Text style={styles.statLabel}>Completed Quiz</Text>
         </View>
         <View style={styles.statCard}>
           <View style={styles.streakRow}>
@@ -186,13 +197,13 @@ export default function ProfileScreen() {
       {/* Notifications */}
       <SectionLabel title="NOTIFICATIONS" />
       <View style={styles.card}>
-        <ToggleRow
+        {/* <ToggleRow
           icon="notifications-outline"
           title="All Notifications"
           subtitle="Master toggle for all notifications"
           value={allNotifs}
           onValueChange={handleAllNotifs}
-        />
+        /> */}
         <ToggleRow
           icon="phone-portrait-outline"
           title="Push Notifications"
@@ -207,14 +218,14 @@ export default function ProfileScreen() {
           value={emailNotifs}
           onValueChange={setEmailNotifs}
         />
-        <ToggleRow
+        {/* <ToggleRow
           icon="alarm-outline"
           title="Study Reminders"
           subtitle="Daily reminders based on schedule"
           value={studyReminders}
           onValueChange={setStudyReminders}
           showDivider={false}
-        />
+        /> */}
       </View>
 
       {/* Account */}
@@ -238,12 +249,12 @@ export default function ProfileScreen() {
       {/* Support */}
       <SectionLabel title="SUPPORT" />
       <View style={styles.card}>
-        <SettingsRow
+        {/* <SettingsRow
           icon="help-circle-outline"
           title="Help Center"
           subtitle="FAQs and guides"
           onPress={() => Alert.alert('Coming Soon', 'Help center coming soon.')}
-        />
+        /> */}
         <SettingsRow
           icon="mail-outline"
           title="Contact Support"
@@ -276,6 +287,7 @@ export default function ProfileScreen() {
       {/* Version */}
       <Text style={styles.version}>MEMO v1.0.0</Text>
     </ScrollView>
+    </View>
   )
 }
 
@@ -292,11 +304,16 @@ const styles = StyleSheet.create({
     alignItems:     'center',
     justifyContent: 'center',
   },
+  fixedHeader: {
+    paddingHorizontal: Spacing.base, paddingTop: Spacing.xl + 32, paddingBottom: Spacing.base,
+    backgroundColor: Colors.background,
+  },
+  headerTitle: {
+    fontSize: Typography.xxl, fontWeight: Typography.bold, color: Colors.textPrimary,
+  },
   container: {
     paddingHorizontal: Spacing.base,
-    paddingTop:        Spacing.xl + 32,
     paddingBottom:     Spacing.xxxl,
-    gap:               Spacing.md,
   },
 
   // Profile Header

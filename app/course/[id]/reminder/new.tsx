@@ -269,7 +269,7 @@ import {
               daysOfWeek: Array.from(days), timeSlots,
             })
           }
-          router.back()
+          router.replace(`/course/${courseId}`)
         } catch (err: any) {
           Alert.alert('Error', err.message)
         } finally {
@@ -286,7 +286,7 @@ import {
             onPress: async () => {
               try {
                 await deleteReminder(reminderId)
-                router.back()
+                router.replace(`/course/${courseId}`)
               } catch (err: any) {
                 Alert.alert('Error', err.message)
               }

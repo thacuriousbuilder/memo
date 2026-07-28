@@ -1,11 +1,11 @@
-// app/course/create.tsx — new file, Details step only for now
+
 
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Alert,
   ActivityIndicator
 } from 'react-native'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { router } from 'expo-router'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Colors, Spacing, Radius, Typography } from '@/constants/theme'
@@ -438,6 +438,8 @@ function StepOrganize({
 // ─────────────────────────────────────────
 // STEP 4 — BUILDING
 // ─────────────────────────────────────────
+
+
 function StepBuilding({
   courseDetails, organizeItems, tempNotes,
 }: {
@@ -449,9 +451,12 @@ function StepBuilding({
   const [status,   setStatus]   = useState('Creating course...')
   const [error,    setError]    = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
+  const [builtCourseId, setBuiltCourseId] = useState<string | null>(null)
+  const hasStarted = useRef(false)
 
   useEffect(() => {
-    if (!user) return
+    if (!user || hasStarted.current) return
+    hasStarted.current = true
     build()
   }, [user])
 
@@ -468,30 +473,22 @@ function StepBuilding({
       const { data: course, error: courseErr } = await supabase
         .from('courses')
         .insert({
-          user_id:      user.id,
-          title:        courseDetails.name,
-          emoji:        courseDetails.icon,
-          color:        courseDetails.color,
-          course_group: courseDetails.courseGroup || null,
-          description:  null,
+          user_id: user.id, title: courseDetails.name, emoji: courseDetails.icon,
+          color: courseDetails.color, course_group: courseDetails.courseGroup || null,
+          description: null,
         })
-        .select('id')
-        .single()
+        .select('id').single()
       if (courseErr) throw courseErr
       const courseId = course.id
 
-      // Always create one hidden default section for unorganized topics
       const { data: defaultSection, error: defaultSecErr } = await supabase
         .from('sections')
         .insert({ course_id: courseId, title: 'General', order_index: 0, is_default: true })
-        .select('id')
-        .single()
+        .select('id').single()
       if (defaultSecErr) throw defaultSecErr
 
       const total = organizeItems.length
       let done = 0
-
-      // Walk the flat list, tracking current folder/topic context by depth
       let currentSectionId = defaultSection.id
       let sectionOrderIndex = 1
       let lessonOrderIndex = 0
@@ -505,20 +502,16 @@ function StepBuilding({
           const { data: section, error: secErr } = await supabase
             .from('sections')
             .insert({ course_id: courseId, title: item.title || 'Untitled folder', order_index: sectionOrderIndex++, is_default: false })
-            .select('id')
-            .single()
+            .select('id').single()
           if (secErr) throw secErr
           currentSectionId = section.id
           lessonOrderIndex = 0
           currentLessonId = null
-        }
-
-        else if (item.kind === 'topic') {
+        } else if (item.kind === 'topic') {
           const { data: lesson, error: lesErr } = await supabase
             .from('lessons')
             .insert({ section_id: currentSectionId, title: item.title || 'Untitled topic', order_index: lessonOrderIndex++ })
-            .select('id')
-            .single()
+            .select('id').single()
           if (lesErr) throw lesErr
           currentLessonId = lesson.id
           subOrderIndex = 0
@@ -526,49 +519,40 @@ function StepBuilding({
           if (item.fileIndex !== undefined) {
             const note = tempNotes.find(n => n.file_index === item.fileIndex)
             if (note) {
-              const { error: noteErr } = await supabase
-                .from('notes')
-                .insert({
-                  lesson_id: lesson.id, sub_lesson_id: null,
-                  file_name: note.file_name, file_type: note.file_type,
-                  s3_key: note.s3_key, parsed_text: note.parsed_text,
-                })
+              const { error: noteErr } = await supabase.from('notes').insert({
+                lesson_id: lesson.id, sub_lesson_id: null,
+                file_name: note.file_name, file_type: note.file_type,
+                s3_key: note.s3_key, parsed_text: note.parsed_text,
+              })
               if (noteErr) throw noteErr
             }
           }
-        }
-
-        else if (item.kind === 'subtopic' && currentLessonId) {
+        } else if (item.kind === 'subtopic' && currentLessonId) {
           const { data: sub, error: subErr } = await supabase
             .from('sub_lessons')
             .insert({ lesson_id: currentLessonId, title: item.title || 'Untitled subtopic', order_index: subOrderIndex++ })
-            .select('id')
-            .single()
+            .select('id').single()
           if (subErr) throw subErr
 
           if (item.fileIndex !== undefined) {
             const note = tempNotes.find(n => n.file_index === item.fileIndex)
             if (note) {
-              const { error: noteErr } = await supabase
-                .from('notes')
-                .insert({
-                  lesson_id: null, sub_lesson_id: sub.id,
-                  file_name: note.file_name, file_type: note.file_type,
-                  s3_key: note.s3_key, parsed_text: note.parsed_text,
-                })
+              const { error: noteErr } = await supabase.from('notes').insert({
+                lesson_id: null, sub_lesson_id: sub.id,
+                file_name: note.file_name, file_type: note.file_type,
+                s3_key: note.s3_key, parsed_text: note.parsed_text,
+              })
               if (noteErr) throw noteErr
             }
           }
         }
-
         done++
       }
 
       await update('Finishing up...', 95)
       setProgress(100); setStatus('Done! 🎉')
-      await new Promise(r => setTimeout(r, 600))
-
-      router.replace(`/course/${courseId}`)
+      await new Promise(r => setTimeout(r, 400))
+      setBuiltCourseId(courseId)
     } catch (err: any) {
       setError(err.message)
     }
@@ -582,16 +566,40 @@ function StepBuilding({
     </View>
   )
 
+  if (builtCourseId) return (
+    <View style={[styles.stepContainer, styles.centerFlex]}>
+      <View style={[styles.reminderPromptIcon, { backgroundColor: courseDetails.color + '22' }]}>
+        <MaterialCommunityIcons name={courseDetails.icon as any} size={32} color={courseDetails.color} />
+      </View>
+      <Text style={styles.analyzingTitle}>Your course is ready! 🎉</Text>
+      <Text style={styles.analyzingSubtitle}>Now let Memo help you remember it with quick study sessions that fit your schedule.</Text>
+
+      <TouchableOpacity
+        style={[styles.nextBtn, { marginTop: Spacing.lg, width: '100%' }]}
+        onPress={() => router.replace(`/course/${builtCourseId}/reminder/new`)}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.nextBtnText}>Choose my study time</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={{ paddingVertical: Spacing.md }}
+        onPress={() => router.replace(`/course/${builtCourseId}`)}
+      >
+        <Text style={styles.skipText}>Maybe later</Text>
+      </TouchableOpacity>
+    </View>
+  )
+
   return (
     <View style={[styles.stepContainer, styles.centerFlex]}>
-      <Text style={{ fontSize: 48 }}>{progress === 100 ? '✅' : '🏗️'}</Text>
-      <Text style={styles.analyzingTitle}>{progress === 100 ? 'Course Ready!' : 'Building your course'}</Text>
+      <Text style={{ fontSize: 48 }}>🏗️</Text>
+      <Text style={styles.analyzingTitle}>Building your course</Text>
       <Text style={styles.analyzingSubtitle}>{status}</Text>
       <View style={styles.buildProgressTrack}>
-        <View style={[styles.buildProgressFill, { width: `${progress}%`, backgroundColor: progress === 100 ? Colors.success : Colors.primary }]} />
+        <View style={[styles.buildProgressFill, { width: `${progress}%` }]} />
       </View>
       <Text style={styles.analyzingSubtitle}>{progress}%</Text>
-      {progress < 100 && <ActivityIndicator color={Colors.primary} style={{ marginTop: Spacing.md }} />}
+      <ActivityIndicator color={Colors.primary} style={{ marginTop: Spacing.md }} />
     </View>
   )
 }
@@ -734,4 +742,6 @@ retryBtnText: { fontSize: Typography.sm, fontWeight: Typography.semibold, color:
 organizeSubtitle: { fontSize: Typography.sm, color: Colors.textSecondary, marginTop: -Spacing.sm, marginBottom: Spacing.md },
 buildProgressTrack: { width: '100%', height: 6, backgroundColor: Colors.progressTrack, borderRadius: Radius.full, overflow: 'hidden', marginTop: Spacing.md },
 buildProgressFill: { height: 6, borderRadius: Radius.full },
+reminderPromptIcon: { width: 64, height: 64, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.sm },
+skipText: { fontSize: Typography.sm, color: Colors.textSecondary, fontWeight: Typography.medium },
 })

@@ -48,21 +48,25 @@ export function useCourses(userId: string | null) {
 
       // Fetch courses with sections → lessons → sub_lessons
       const { data: coursesData, error: coursesError } = await supabase
-        .from('courses')
-        .select(`
+      .from('courses')
+      .select(`
+        *,
+        notes (id),
+        sections (
           *,
-          notes (id),
-          sections (
+          lessons (
             *,
-            lessons (
-              *,
-              sub_lessons (id),
-              user_progress (status)
-            )
+            notes (id),
+            sub_lessons (
+              id,
+              notes (id)
+            ),
+            user_progress (status)
           )
-        `)
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
 
       if (coursesError) throw coursesError
 
@@ -116,15 +120,21 @@ export function useCourses(userId: string | null) {
             }
           })
 
-        return {
-          ...course,
-          sections,
-          upcoming_exams: courseExams,
-          total_lessons:  totalLessons,
-          done_lessons:   doneLessons,
-          progress_pct:   progressPct,
-          notes_count:    (course.notes ?? []).length, 
-        }
+          return {
+            ...course,
+            sections,
+            upcoming_exams: courseExams,
+            total_lessons:  totalLessons,
+            done_lessons:   doneLessons,
+            progress_pct:   progressPct,
+            notes_count: (course.notes ?? []).length
+              + sections.reduce((s: number, sec: any) =>
+                  s + (sec.lessons ?? []).reduce((s2: number, les: any) =>
+                    s2 + (les.notes ?? []).length
+                       + (les.sub_lessons ?? []).reduce((s3: number, sub: any) => s3 + (sub.notes ?? []).length, 0)
+                  , 0)
+                , 0),
+          }
       })
 
       setCourses(enriched)

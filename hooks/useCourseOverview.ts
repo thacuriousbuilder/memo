@@ -154,7 +154,6 @@ export function useCourseOverview(
       const passedSubLessonIds = new Set((progressRows ?? []).filter(p => p.status === 'passed' && p.sub_lesson_id).map(p => p.sub_lesson_id))
 
       // Collect every topic/subtopic id across folders + unorganized
-     // hooks/useCourseOverview.ts — replace the progressPct calculation block
       const allTopics  = [...unorganizedTopics, ...folders.flatMap(f => f.topics)]
       const structuredTotal = allTopics.length + allTopics.reduce((s, t) => s + t.subtopics.length, 0)
       const structuredDone  =

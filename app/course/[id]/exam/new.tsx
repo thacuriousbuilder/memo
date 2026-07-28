@@ -1,4 +1,4 @@
-// app/course/[id]/exam/new.tsx
+
 
 import {
     View, Text, TextInput, TouchableOpacity,

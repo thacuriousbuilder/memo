@@ -1,39 +1,36 @@
-// hooks/useDashboard.ts
 
 import { useState, useCallback } from 'react'
 import { useFocusEffect }        from 'expo-router'
 import { supabase }              from '@/lib/supabase'
+import { formatTime, ScopeType, SessionType } from '@/hooks/useReminders'
 
 // ─────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────
-export interface NextUpLesson {
-  id:          string
-  title:        string
-  course_title: string
-  course_emoji: string
-  questions:    number
-  progress:     number
-  mode:         'lesson' | 'lesson_all'
-}
-
-export interface TodayCourse {
-  id:           string
-  lesson_id:    string
-  emoji:        string
-  title:        string
-  questions:    number
-  done:         boolean
-  score:        number
+export interface PlanItem {
+  reminderId:    string
+  slotId:        string
+  label:         string
+  courseId:      string
+  courseTitle:   string
+  courseEmoji:   string
+  courseColor:   string | null
+  time:          string
+  timeValue:     number
+  sessionType:   SessionType
+  questionCount: number | null
+  scopeType:     ScopeType
+  scopeId:       string | null
+  done:          boolean
 }
 
 export interface UpcomingExam {
-  id:           string
-  title:        string
-  course:       string
-  emoji:        string
-  exam_date:    string
-  days_left:    number
+  id:        string
+  title:     string
+  course:    string
+  emoji:     string
+  exam_date: string
+  days_left: number
 }
 
 export interface RecentSession {
@@ -52,25 +49,39 @@ export interface WeekStats {
   study_time: string
 }
 
+export interface WeekPlanItem {
+  reminderId:    string
+  slotId:        string
+  dayIndex:      number   // 0=Mon..6=Sun
+  label:         string
+  courseId:      string
+  courseTitle:   string
+  courseEmoji:   string
+  courseColor:   string | null
+  time:          string
+  timeValue:     number
+  sessionType:   SessionType
+  questionCount: number | null
+}
+
 export interface DashboardData {
-  next_up:        NextUpLesson | null
-  today_courses:  TodayCourse[]
-  upcoming_exams: UpcomingExam[]
+  next_up:         PlanItem | null
+  later_today:     PlanItem[]
+  upcoming_exams:  UpcomingExam[]
   recent_sessions: RecentSession[]
-  week_stats:     WeekStats
-  streak:         number
+  week_stats:      WeekStats
+  week_plan:       WeekPlanItem[]
+  streak:          number
 }
 
 // ─────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────
 function getRelativeTime(dateStr: string): string {
-  const date  = new Date(dateStr)
-  const now   = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffH  = diffMs / (1000 * 60 * 60)
+  const date   = new Date(dateStr)
+  const now    = new Date()
+  const diffH  = (now.getTime() - date.getTime()) / (1000 * 60 * 60)
   const diffD  = Math.floor(diffH / 24)
-
   if (diffH < 24) return 'Today'
   if (diffD === 1) return 'Yesterday'
   return `${diffD} days ago`
@@ -81,9 +92,12 @@ function getDaysLeft(dateStr: string): number {
   const now  = new Date()
   exam.setHours(0, 0, 0, 0)
   now.setHours(0, 0, 0, 0)
-  return Math.ceil(
-    (exam.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-  )
+  return Math.ceil((exam.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function timeToMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number)
+  return h * 60 + m
 }
 
 // ─────────────────────────────────────────
@@ -95,273 +109,151 @@ export function useDashboard(userId: string | null) {
   const [error,   setError]   = useState<string | null>(null)
 
   const fetchDashboard = useCallback(async () => {
-    if (!userId) {
-      setLoading(false)
-      return
-    }
+    if (!userId) { setLoading(false); return }
     try {
       setLoading(true)
       setError(null)
 
-      // Run all queries in parallel
-      const [
-        coursesRes,
-        attemptsRes,
-        examsRes,
-        progressRes,
-        profileRes,
-      ] = await Promise.all([
-        // All courses with sections → lessons
+      const todayDow = new Date().getDay() // 0=Sun..6=Sat
+      const todayStr = new Date().toDateString()
+
+      const [remindersRes, attemptsRes, examsRes, profileRes] = await Promise.all([
         supabase
-          .from('courses')
+          .from('reminders')
           .select(`
-            id, title, emoji, color,
-            sections (
-              id,
-              lessons (
-                id, title, order_index,
-                user_progress!left (status),
-                notes (id, questions(id)),
-                sub_lessons (
-                  id,
-                  notes (id, questions(id))
-                )
-              )
-            )
+            id, label, scope_type, scope_id, days_of_week, is_active,
+            courses ( id, title, emoji, color ),
+            reminder_time_slots ( id, time_of_day, session_type, question_count )
           `)
           .eq('user_id', userId)
-          .order('created_at', { ascending: false }),
+          .eq('is_active', true),
 
-        // Recent quiz attempts
         supabase
           .from('quiz_attempts')
-          .select(`
-            id, score, question_count, created_at,
-            lessons (id, title, sections(courses(title, emoji))),
-            sub_lessons (id, title, lessons(sections(courses(title, emoji))))
-          `)
+          .select('id, score, question_count, created_at, course_id, lesson_id, sub_lesson_id, lessons(title, sections(courses(title))), sub_lessons(title, lessons(sections(courses(title))))')
           .eq('user_id', userId)
           .order('created_at', { ascending: false })
-          .limit(20),
+          .limit(30),
 
-        // Upcoming exams
         supabase
           .from('exams')
-          .select(`
-            id, title, exam_date, exam_type,
-            courses (title, emoji)
-          `)
+          .select(`id, title, exam_date, exam_type, courses (title, emoji)`)
           .eq('user_id', userId)
           .eq('status', 'upcoming')
           .gte('exam_date', new Date().toISOString().split('T')[0])
           .order('exam_date', { ascending: true })
           .limit(10),
 
-        // User progress
-        supabase
-          .from('user_progress')
-          .select('lesson_id, sub_lesson_id, status, updated_at')
-          .eq('user_id', userId),
-
-        // Profile for streak
         supabase
           .from('profiles')
-          .select('streak_count, last_studied_at')
+          .select('streak_count')
           .eq('id', userId)
           .single(),
       ])
 
-      const courses  = coursesRes.data  ?? []
-      const attempts = attemptsRes.data ?? []
-      const exams    = examsRes.data    ?? []
-      const progress = progressRes.data ?? []
-      const profile  = profileRes.data
+      const reminders: any[] = remindersRes.data ?? []
+      const attempts  = attemptsRes.data  ?? []
+      const exams     = examsRes.data     ?? []
+      const profile   = profileRes.data
 
-      // ── Build progress map ──
-      const progressMap = new Map<string, string>()
-      progress.forEach((p: any) => {
-        if (p.lesson_id)     progressMap.set(p.lesson_id,     p.status)
-        if (p.sub_lesson_id) progressMap.set(p.sub_lesson_id, p.status)
-      })
-
-      // ── Today's courses ──
-      // Get all lessons that have questions, build today's quiz list
-      const today = new Date()
-      const todayStr = today.toDateString()
-
-      const todayAttemptLessonIds = new Set(
-        attempts
-          .filter((a: any) =>
-            new Date(a.created_at).toDateString() === todayStr
-          )
-          .map((a: any) => a.lessons?.id)
-          .filter(Boolean)
+      const todayAttempts = attempts.filter(
+        (a: any) => new Date(a.created_at).toDateString() === todayStr
       )
 
-      const todayCourses: TodayCourse[] = []
-      for (const course of courses) {
-        for (const section of course.sections ?? []) {
-          for (const lesson of section.lessons ?? []) {
-            const hasQuestions =
-              (lesson.notes ?? []).some((n: any) => n.questions?.length > 0) ||
-              (lesson.sub_lessons ?? []).some((sl: any) =>
-                sl.notes?.some((n: any) => n.questions?.length > 0)
-              )
+      // ── Build today's plan from reminders scheduled for today ──
+      const planItems: PlanItem[] = []
+      for (const r of reminders) {
+        if (!r.courses || !(r.days_of_week ?? []).includes(todayDow)) continue
 
-            if (!hasQuestions) continue
+        for (const slot of r.reminder_time_slots ?? []) {
+          const done = todayAttempts.some((a: any) => {
+            if (r.scope_type === 'topic')    return a.lesson_id === r.scope_id
+            if (r.scope_type === 'subtopic') return a.sub_lesson_id === r.scope_id
+            return a.course_id === r.courses.id
+          })
 
-            const done     = todayAttemptLessonIds.has(lesson.id)
-            const todayAtt = attempts.find(
-              (a: any) =>
-                a.lessons?.id === lesson.id &&
-                new Date(a.created_at).toDateString() === todayStr
-            )
-            const score = todayAtt
-              ? Math.round((todayAtt.score / todayAtt.question_count) * 100)
-              : 0
+          planItems.push({
+            reminderId:    r.id,
+            slotId:        slot.id,
+            label:         r.label,
+            courseId:      r.courses.id,
+            courseTitle:   r.courses.title,
+            courseEmoji:   r.courses.emoji,
+            courseColor:   r.courses.color,
+            time:          formatTime(slot.time_of_day),
+            timeValue:     timeToMinutes(slot.time_of_day),
+            sessionType:   slot.session_type,
+            questionCount: slot.question_count,
+            scopeType:     r.scope_type,
+            scopeId:       r.scope_id,
+            done,
+          })
+        }
+      }
 
-            const qCount =
-              (lesson.notes ?? [])
-                .flatMap((n: any) => n.questions ?? []).length +
-              (lesson.sub_lessons ?? [])
-                .flatMap((sl: any) =>
-                  (sl.notes ?? []).flatMap((n: any) => n.questions ?? [])
-                ).length
+      planItems.sort((a, b) => a.timeValue - b.timeValue)
 
-            todayCourses.push({
-              id:        course.id,
-              lesson_id: lesson.id,
-              emoji:     course.emoji,
-              title:     course.title,
-              questions: qCount,
-              done,
-              score,
+      const nextUp = planItems.find(i => !i.done) ?? null
+      const laterToday = planItems.filter(i => i !== nextUp)
+
+      const weekPlan: WeekPlanItem[] = []
+      for (const r of reminders) {
+        if (!r.courses) continue
+        for (const dow of r.days_of_week ?? []) {
+          const dayIndex = (dow + 6) % 7 // Sun-first (0=Sun) -> Mon-first (0=Mon)
+          for (const slot of r.reminder_time_slots ?? []) {
+            weekPlan.push({
+              reminderId:    r.id,
+              slotId:        slot.id,
+              dayIndex,
+              label:         r.label,
+              courseId:      r.courses.id,
+              courseTitle:   r.courses.title,
+              courseEmoji:   r.courses.emoji,
+              courseColor:   r.courses.color,
+              time:          formatTime(slot.time_of_day),
+              timeValue:     timeToMinutes(slot.time_of_day),
+              sessionType:   slot.session_type,
+              questionCount: slot.question_count,
             })
           }
         }
       }
+      weekPlan.sort((a, b) => a.timeValue - b.timeValue)
 
-      // ── Next Up ──
-      // First in_progress lesson, else first not_started with questions
-      let nextUp: NextUpLesson | null = null
-      for (const course of courses) {
-        if (nextUp) break
-        for (const section of course.sections ?? []) {
-          if (nextUp) break
-          const sorted = [...(section.lessons ?? [])].sort(
-            (a: any, b: any) => a.order_index - b.order_index
-          )
-          for (const lesson of sorted) {
-            const status = progressMap.get(lesson.id)
-            if (status === 'passed') continue
-
-            const hasQ =
-              (lesson.notes ?? []).some((n: any) => n.questions?.length > 0) ||
-              (lesson.sub_lessons ?? []).some((sl: any) =>
-                sl.notes?.some((n: any) => n.questions?.length > 0)
-              )
-            if (!hasQ) continue
-
-            const qCount =
-              (lesson.notes ?? [])
-                .flatMap((n: any) => n.questions ?? []).length +
-              (lesson.sub_lessons ?? [])
-                .flatMap((sl: any) =>
-                  (sl.notes ?? []).flatMap((n: any) => n.questions ?? [])
-                ).length
-
-            const hasSubs = (lesson.sub_lessons ?? []).length > 0
-
-            nextUp = {
-              id:           lesson.id,
-              title:        lesson.title,
-              course_title: course.title,
-              course_emoji: course.emoji,
-              questions:    qCount,
-              progress:     status === 'in_progress' ? 50 : 0,
-              mode:         hasSubs ? 'lesson_all' : 'lesson',
-            }
-            break
-          }
-        }
-      }
-
-      // ── Upcoming Exams ──
       const upcomingExams: UpcomingExam[] = exams.map((e: any) => ({
-        id:        e.id,
-        title:     e.title,
-        course:    e.courses?.title ?? '',
-        emoji:     e.courses?.emoji ?? '📄',
-        exam_date: e.exam_date,
+        id: e.id, title: e.title, course: e.courses?.title ?? '',
+        emoji: e.courses?.emoji ?? 'book-open-variant', exam_date: e.exam_date,
         days_left: getDaysLeft(e.exam_date),
       }))
 
-      // ── Recent Sessions ──
-      const recentSessions: RecentSession[] = attempts
-        .slice(0, 10)
-        .map((a: any) => {
-          const lessonTitle =
-            a.lessons?.title ??
-            a.sub_lessons?.title ??
-            'Quiz'
+      const recentSessions: RecentSession[] = attempts.slice(0, 10).map((a: any) => ({
+        id: a.id,
+        title: a.lessons?.title ?? a.sub_lessons?.title ?? 'Quiz',
+        course: a.lessons?.sections?.courses?.title ?? a.sub_lessons?.lessons?.sections?.courses?.title ?? '',
+        questions: a.question_count,
+        score: a.question_count > 0 ? Math.round((a.score / a.question_count) * 100) : 0,
+        when: getRelativeTime(a.created_at),
+        completed_at: a.created_at,
+      }))
 
-          const courseTitle =
-            a.lessons?.sections?.courses?.title ??
-            a.sub_lessons?.lessons?.sections?.courses?.title ??
-            ''
-
-          const courseEmoji =
-            a.lessons?.sections?.courses?.emoji ??
-            a.sub_lessons?.lessons?.sections?.courses?.emoji ??
-            '📚'
-
-          return {
-            id:           a.id,
-            title:        lessonTitle,
-            course:       courseTitle,
-            questions:    a.question_count,
-            score:        Math.round((a.score / a.question_count) * 100),
-            when:         getRelativeTime(a.created_at),
-            completed_at: a.created_at,
-          }
-        })
-
-      // ── Week Stats ──
       const weekStart = new Date()
       weekStart.setDate(weekStart.getDate() - 7)
+      const weekAttempts  = attempts.filter((a: any) => new Date(a.created_at) >= weekStart)
+      const weekQuestions = weekAttempts.reduce((s: number, a: any) => s + a.question_count, 0)
+      const weekCorrect   = weekAttempts.reduce((s: number, a: any) => s + a.score, 0)
+      const weekAccuracy  = weekQuestions > 0 ? Math.round((weekCorrect / weekQuestions) * 100) : 0
+      const weekHours     = Math.floor(weekQuestions / 60)
+      const weekTime      = weekHours > 0 ? `${weekHours}h ${weekQuestions % 60}m` : `${weekQuestions}m`
 
-      const weekAttempts = attempts.filter(
-        (a: any) => new Date(a.created_at) >= weekStart
-      )
-
-      const weekQuestions = weekAttempts.reduce(
-        (s: number, a: any) => s + a.question_count, 0
-      )
-      const weekCorrect = weekAttempts.reduce(
-        (s: number, a: any) => s + a.score, 0
-      )
-      const weekAccuracy = weekQuestions > 0
-        ? Math.round((weekCorrect / weekQuestions) * 100)
-        : 0
-
-      // Estimate study time: ~1 min per question
-      const weekMins  = weekQuestions
-      const weekHours = Math.floor(weekMins / 60)
-      const weekRemMins = weekMins % 60
-      const weekTime  = weekHours > 0
-        ? `${weekHours}h ${weekRemMins}m`
-        : `${weekMins}m`
-
+      
       setData({
-        next_up:         nextUp,
-        today_courses:   todayCourses.slice(0, 5),
-        upcoming_exams:  upcomingExams,
+        next_up: nextUp,
+        later_today: laterToday,
+        upcoming_exams: upcomingExams,
         recent_sessions: recentSessions,
-        week_stats: {
-          questions:  weekQuestions,
-          accuracy:   weekAccuracy,
-          study_time: weekTime,
-        },
+        week_stats: { questions: weekQuestions, accuracy: weekAccuracy, study_time: weekTime },
+        week_plan: weekPlan,
         streak: profile?.streak_count ?? 0,
       })
     } catch (err: any) {
@@ -372,12 +264,7 @@ export function useDashboard(userId: string | null) {
     }
   }, [userId])
 
-  // Refetch every time screen comes into focus
-  useFocusEffect(
-    useCallback(() => {
-      fetchDashboard()
-    }, [fetchDashboard])
-  )
+  useFocusEffect(useCallback(() => { fetchDashboard() }, [fetchDashboard]))
 
   return { data, loading, error, refetch: fetchDashboard }
 }

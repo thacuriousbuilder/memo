@@ -1,4 +1,4 @@
-// hooks/useReminders.ts
+
 
 import { useState, useCallback } from 'react'
 import { useFocusEffect } from 'expo-router'
@@ -204,6 +204,48 @@ export async function getReminder(reminderId: string): Promise<Reminder | null> 
       if (insertErr) throw insertErr
     }
   }
+
+  // ─────────────────────────────────────────
+// RESOLVE A REMINDER'S SCOPE INTO NOTE IDS
+// Mirrors the note-resolution logic in useQuiz.ts,
+// but keyed off scope_type/scope_id instead of a QuizMode.
+// ─────────────────────────────────────────
+export async function resolveReminderNoteIds(
+  scopeType: ScopeType,
+  scopeId:   string | null
+): Promise<string[]> {
+  if (scopeType === 'all' || !scopeId) {
+    // 'all' scope is resolved by the caller (course-level flat notes + everything under it)
+    // since this function doesn't know which course it belongs to on its own.
+    return []
+  }
+
+  if (scopeType === 'subtopic') {
+    const { data } = await supabase.from('notes').select('id').eq('sub_lesson_id', scopeId)
+    return (data ?? []).map(n => n.id)
+  }
+
+  if (scopeType === 'topic') {
+    const { data: ownNotes } = await supabase.from('notes').select('id').eq('lesson_id', scopeId)
+    const { data: subs } = await supabase.from('sub_lessons').select('id').eq('lesson_id', scopeId)
+    const subIds = (subs ?? []).map(s => s.id)
+    const subNotes = subIds.length
+      ? (await supabase.from('notes').select('id').in('sub_lesson_id', subIds)).data ?? []
+      : []
+    return [...(ownNotes ?? []).map(n => n.id), ...subNotes.map(n => n.id)]
+  }
+
+  if (scopeType === 'folder') {
+    const { data: lessons } = await supabase.from('lessons').select('id').eq('section_id', scopeId)
+    const all: string[] = []
+    for (const l of lessons ?? []) {
+      all.push(...await resolveReminderNoteIds('topic', l.id))
+    }
+    return all
+  }
+
+  return []
+}
 // ─────────────────────────────────────────
 // TOGGLE ACTIVE
 // ─────────────────────────────────────────

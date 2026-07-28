@@ -1,4 +1,4 @@
-// app/course/[id].tsx
+
 
 import {
   View, Text, ScrollView, TouchableOpacity,
@@ -20,7 +20,14 @@ import { Switch } from 'react-native'
 // GRADE BADGE
 // ─────────────────────────────────────────
 function GradeBadge({ pct }: { pct: number | null }) {
-  if (pct === null) return null
+  if (pct === null) {
+    return (
+      <View style={[styles.gradeBadge, { backgroundColor: Colors.cardElevated }]}>
+        <Text style={[styles.gradePct, { color: Colors.textMuted }]}>—</Text>
+        <Text style={[styles.gradeLabel, { color: Colors.textMuted }]}>GRADE</Text>
+      </View>
+    )
+  }
   const color = pct >= 80 ? Colors.success : pct >= 60 ? Colors.warning : Colors.error
   return (
     <View style={[styles.gradeBadge, { backgroundColor: color + '1A' }]}>

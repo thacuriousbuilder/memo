@@ -1,4 +1,4 @@
-// components/organizeList.tsx
+
 
 import { View, Text, TextInput, StyleSheet, TouchableOpacity } from 'react-native'
 import { useState, useRef, useEffect } from 'react'

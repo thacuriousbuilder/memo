@@ -1,4 +1,4 @@
-// constants/courseAppearance.ts
+
 
 // Single icon family (MaterialCommunityIcons) so every
 // render site just needs one component, not a lookup by family.
