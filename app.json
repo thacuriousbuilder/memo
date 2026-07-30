@@ -16,7 +16,13 @@
           "iCloudContainerEnvironment": "Production"
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.604899706209-ag9ic3h6oc95e9petfgnpp0ts5fo7a5e"
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": false,

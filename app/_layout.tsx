@@ -8,6 +8,7 @@ import { StatusBar } from 'expo-status-bar'
 import { ActivityIndicator, View } from 'react-native'
 import { supabase } from '@/lib/supabase'
 import { Colors } from '@/constants/theme'
+import { configureGoogleSignIn } from '@/lib/auth'
 
 function useProtectedRoute(session: Session | null, loading: boolean) {
   const segments = useSegments()
@@ -29,6 +30,10 @@ export default function RootLayout() {
   const [loading, setLoading] = useState(true)
 
   useProtectedRoute(session, loading)
+
+  useEffect(() => {
+    configureGoogleSignIn()
+  }, [])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {

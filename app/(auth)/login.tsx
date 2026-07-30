@@ -9,12 +9,44 @@ import {
   import { Ionicons, MaterialCommunityIcons, AntDesign } from '@expo/vector-icons'
   import { signIn } from '@/lib/supabase'
   import { Colors, Spacing, Radius, Typography } from '@/constants/theme'
+  import { signInWithGoogle, signInWithApple } from '@/lib/auth'
   
   export default function LoginScreen() {
     const [email,        setEmail]        = useState('')
     const [password,     setPassword]     = useState('')
     const [showPassword, setShowPassword] = useState(false)
     const [loading,      setLoading]      = useState(false)
+    const [googleLoading, setGoogleLoading] = useState(false)
+    const [appleLoading,  setAppleLoading]  = useState(false)
+
+    async function handleGoogleSignIn() {
+      try {
+        setGoogleLoading(true)
+        await signInWithGoogle()
+        router.replace('/(tabs)')
+      } catch (error: any) {
+        if (error.code !== 'SIGN_IN_CANCELLED') {
+          Alert.alert('Error', 'Something went wrong while connecting to your Google account. Please try again or choose a different sign-in method.')
+        }
+      } finally {
+        setGoogleLoading(false)
+      }
+    }
+    
+    async function handleAppleSignIn() {
+      try {
+        setAppleLoading(true)
+        await signInWithApple()
+        router.replace('/(tabs)')
+      } catch (error: any) {
+        console.log('[Apple] sign-in error:', error.message, JSON.stringify(error, null, 2))
+        if (error.code !== 'ERR_REQUEST_CANCELED') {
+          Alert.alert('Error', 'Something went wrong while connecting to your Apple account. Please try again or choose a different sign-in method.')
+        }
+      } finally {
+        setAppleLoading(false)
+      }
+    }
   
     const handleLogin = async () => {
       if (!email || !password) {
@@ -140,23 +172,35 @@ import {
   
             {/* Social Buttons */}
             <View style={styles.socialRow}>
-              <TouchableOpacity
-                style={styles.socialButton}
-                onPress={() => Alert.alert('Coming Soon', 'Google login coming soon.')}
-              >
-                <AntDesign name="google" size={18} color={Colors.textPrimary} />
-                <Text style={styles.socialText}>Google</Text>
-              </TouchableOpacity>
-  
-              <TouchableOpacity
-                style={styles.socialButton}
-                onPress={() => Alert.alert('Coming Soon', 'Apple login coming soon.')}
-              >
-                <AntDesign name="apple" size={18} color={Colors.textPrimary} />
-                <Text style={styles.socialText}>Apple</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          <TouchableOpacity
+            style={styles.socialButton}
+            onPress={handleGoogleSignIn}
+            disabled={googleLoading || appleLoading}
+          >
+            {googleLoading
+              ? <ActivityIndicator color={Colors.textPrimary} size="small" />
+              : <>
+                  <AntDesign name="google" size={18} color={Colors.textPrimary} />
+                  <Text style={styles.socialText}>Google</Text>
+                </>
+            }
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.socialButton}
+            onPress={handleAppleSignIn}
+            disabled={googleLoading || appleLoading}
+          >
+            {appleLoading
+              ? <ActivityIndicator color={Colors.textPrimary} size="small" />
+              : <>
+                  <AntDesign name="apple" size={18} color={Colors.textPrimary} />
+                  <Text style={styles.socialText}>Apple</Text>
+                </>
+            }
+          </TouchableOpacity>
+        </View>
+        </View>
   
           {/* Footer */}
           <View style={styles.footer}>

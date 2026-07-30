@@ -168,7 +168,7 @@ export default function ProfileScreen() {
             <Text style={styles.avatarText}>{initials}</Text>
           </View>
           <TouchableOpacity style={styles.editAvatarBadge}>
-            <Ionicons name="pencil" size={12} color={Colors.textInverse} />
+            <Ionicons name="pencil" size={12} color={Colors.textPrimary} />
           </TouchableOpacity>
         </View>
         <Text style={styles.userName}>{fullName}</Text>

@@ -9,6 +9,7 @@ import {
   import { Ionicons, MaterialCommunityIcons, AntDesign } from '@expo/vector-icons'
   import { signUp, upsertProfile } from '@/lib/supabase'
   import { Colors, Spacing, Radius, Typography } from '@/constants/theme'
+  import { signInWithGoogle, signInWithApple } from '@/lib/auth'
   
   export default function SignupScreen() {
     const [fullName,        setFullName]        = useState('')
@@ -18,6 +19,55 @@ import {
     const [showPassword,    setShowPassword]    = useState(false)
     const [agreed,          setAgreed]          = useState(false)
     const [loading,         setLoading]         = useState(false)
+    const [googleLoading, setGoogleLoading] = useState(false)
+    const [appleLoading,  setAppleLoading]  = useState(false)
+    
+
+    async function handleGoogleSignIn() {
+      try {
+        setGoogleLoading(true)
+        const authData = await signInWithGoogle()
+    
+        const meta = authData.user?.user_metadata ?? {}
+        const fullName = meta.full_name || meta.name || ''
+        const userEmail = authData.user?.email ?? ''
+    
+        if (authData.user && fullName) {
+          await upsertProfile(authData.user.id, fullName, userEmail)
+        }
+        router.replace('/(tabs)')
+      } catch (error: any) {
+        if (error.code !== 'SIGN_IN_CANCELLED') {
+          Alert.alert('Error', error.message || 'Google sign-in failed')
+        }
+      } finally {
+        setGoogleLoading(false)
+      }
+    }
+    
+    async function handleAppleSignIn() {
+      try {
+        setAppleLoading(true)
+        const authData = await signInWithApple()
+    
+        const meta = authData.user?.user_metadata ?? {}
+        const firstName = meta.given_name || meta.first_name || ''
+        const lastName  = meta.family_name || meta.last_name  || ''
+        const fullName  = `${firstName} ${lastName}`.trim()
+        const userEmail = authData.user?.email ?? ''
+    
+        if (authData.user && fullName) {
+          await upsertProfile(authData.user.id, fullName, userEmail)
+        }
+        router.replace('/(tabs)')
+      } catch (error: any) {
+        if (error.code !== 'ERR_REQUEST_CANCELED') {
+          Alert.alert('Error', error.message || 'Apple sign-in failed')
+        }
+      } finally {
+        setAppleLoading(false)
+      }
+    }
   
     const handleSignup = async () => {
       if (!fullName || !email || !password || !confirmPassword) {
@@ -217,21 +267,34 @@ import {
   
             {/* Social Buttons */}
             <View style={styles.socialRow}>
-              <TouchableOpacity
-                style={styles.socialButton}
-                onPress={() => Alert.alert('Coming Soon', 'Google signup coming soon.')}
-              >
-                <AntDesign name="google" size={18} color={Colors.textPrimary} />
-                <Text style={styles.socialText}>Google</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.socialButton}
-                onPress={() => Alert.alert('Coming Soon', 'Apple signup coming soon.')}
-              >
-                <AntDesign name="apple" size={18} color={Colors.textPrimary} />
-                <Text style={styles.socialText}>Apple</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={styles.socialButton}
+              onPress={handleGoogleSignIn}
+              disabled={googleLoading || appleLoading}
+            >
+              {googleLoading
+                ? <ActivityIndicator color={Colors.textPrimary} size="small" />
+                : <>
+                    <AntDesign name="google" size={18} color={Colors.textPrimary} />
+                    <Text style={styles.socialText}>Google</Text>
+                  </>
+              }
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.socialButton}
+              onPress={handleAppleSignIn}
+              disabled={googleLoading || appleLoading}
+            >
+              {appleLoading
+                ? <ActivityIndicator color={Colors.textPrimary} size="small" />
+                : <>
+                    <AntDesign name="apple" size={18} color={Colors.textPrimary} />
+                    <Text style={styles.socialText}>Apple</Text>
+                  </>
+              }
+            </TouchableOpacity>
+          </View>
           </View>
   
           {/* Footer */}
