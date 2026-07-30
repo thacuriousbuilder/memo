@@ -3,34 +3,10 @@
 import { useState, useCallback } from 'react'
 import { useFocusEffect } from 'expo-router'
 import { supabase } from '@/lib/supabase'
-import { formatTime, formatDaysOfWeek, ScopeType, SessionType } from '@/hooks/useReminders'
 
 // ─────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────
-export interface ScheduledReminder {
-  id:             string
-  label:          string
-  courseId:       string
-  courseTitle:    string
-  courseIcon:     string
-  courseColor:    string | null
-  time:           string
-  daysLabel:      string
-  scopeType:      ScopeType
-  scopeId:        string | null
-  sessionType:    SessionType
-  questionCount:  number | null
-}
-
-export interface WeakestCourse {
-  courseId:   string
-  title:      string
-  icon:       string
-  color:      string | null
-  gradePct:   number
-}
-
 export interface RecentAttempt {
   id:            string
   courseTitle:   string
@@ -40,6 +16,8 @@ export interface RecentAttempt {
   questionCount: number
   scorePct:      number
   date:          string
+  mode:          'course' | 'lesson' | 'sublesson'
+  targetId:      string
 }
 
 export interface Recommendation {
@@ -59,8 +37,6 @@ export interface Recommendation {
 // HOOK
 // ─────────────────────────────────────────
 export function useStudyOverview(userId: string | null) {
-  const [scheduled,      setScheduled]      = useState<ScheduledReminder[]>([])
-  const [weakestCourse,  setWeakestCourse]  = useState<WeakestCourse | null>(null)
   const [recentAttempts, setRecentAttempts] = useState<RecentAttempt[]>([])
   const [recommendations, setRecommendations] = useState<Recommendation[]>([])
   const [loading, setLoading] = useState(true)
@@ -72,41 +48,7 @@ export function useStudyOverview(userId: string | null) {
       setLoading(true)
       setError(null)
 
-      // ── Scheduled reminders across all courses ──
-      const { data: reminderRows, error: remErr } = await supabase
-        .from('reminders')
-        .select(`
-          id, label, scope_type, scope_id, is_active,
-          courses ( id, title, emoji, color ),
-          reminder_time_slots ( time_of_day, session_type, question_count, order_index )
-        `)
-        .eq('user_id', userId)
-        .eq('is_active', true)
-
-      if (remErr) throw remErr
-
-      const flatScheduled: ScheduledReminder[] = []
-      ;(reminderRows ?? []).forEach((r: any) => {
-        const firstSlot = (r.reminder_time_slots ?? []).sort((a: any, b: any) => a.order_index - b.order_index)[0]
-        if (!firstSlot || !r.courses) return
-        flatScheduled.push({
-          id:            r.id,
-          label:         r.label,
-          courseId:      r.courses.id,
-          courseTitle:   r.courses.title,
-          courseIcon:    r.courses.emoji,
-          courseColor:   r.courses.color,
-          time:          formatTime(firstSlot.time_of_day),
-          daysLabel:     '',
-          scopeType:     r.scope_type,
-          scopeId:       r.scope_id,
-          sessionType:   firstSlot.session_type,
-          questionCount: firstSlot.question_count,
-        })
-      })
-      setScheduled(flatScheduled)
-
-      // ── All quiz attempts, joined to course, for weakest-course + recent history ──
+      // ── All quiz attempts, joined to course, for recent history ──
       const { data: attempts, error: attErr } = await supabase
         .from('quiz_attempts')
         .select(`
@@ -121,37 +63,24 @@ export function useStudyOverview(userId: string | null) {
 
       if (attErr) throw attErr
 
-      // Weakest course — average score% grouped by course
-      const byCourse = new Map<string, { title: string; icon: string; color: string | null; totalScore: number; totalCount: number }>()
-      ;(attempts ?? []).forEach((a: any) => {
-        if (!a.courses) return
-        const entry = byCourse.get(a.course_id) ?? { title: a.courses.title, icon: a.courses.emoji, color: a.courses.color, totalScore: 0, totalCount: 0 }
-        entry.totalScore += a.score
-        entry.totalCount += a.question_count
-        byCourse.set(a.course_id, entry)
-      })
+      // Recent attempts — last 5
+      const recent: RecentAttempt[] = (attempts ?? []).slice(0, 5).map((a: any) => {
+        const mode: RecentAttempt['mode'] = a.sub_lesson_id ? 'sublesson' : a.lesson_id ? 'lesson' : 'course'
+        const targetId = a.sub_lesson_id ?? a.lesson_id ?? a.course_id
 
-      let weakest: WeakestCourse | null = null
-      byCourse.forEach((v, courseId) => {
-        if (v.totalCount === 0) return
-        const pct = Math.round((v.totalScore / v.totalCount) * 100)
-        if (!weakest || pct < weakest.gradePct) {
-          weakest = { courseId, title: v.title, icon: v.icon, color: v.color, gradePct: pct }
+        return {
+          id:            a.id,
+          courseTitle:   a.courses?.title ?? 'Unknown course',
+          courseIcon:    a.courses?.emoji ?? 'book-open-variant',
+          courseColor:   a.courses?.color ?? null,
+          scopeLabel:    a.sub_lessons?.title ?? a.lessons?.title ?? 'Whole course',
+          questionCount: a.question_count,
+          scorePct:      a.question_count > 0 ? Math.round((a.score / a.question_count) * 100) : 0,
+          date:          new Date(a.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          mode,
+          targetId,
         }
       })
-      setWeakestCourse(weakest)
-
-      // Recent attempts — last 5
-      const recent: RecentAttempt[] = (attempts ?? []).slice(0, 5).map((a: any) => ({
-        id:            a.id,
-        courseTitle:   a.courses?.title ?? 'Unknown course',
-        courseIcon:    a.courses?.emoji ?? 'book-open-variant',
-        courseColor:   a.courses?.color ?? null,
-        scopeLabel:    a.sub_lessons?.title ?? a.lessons?.title ?? 'Whole course',
-        questionCount: a.question_count,
-        scorePct:      a.question_count > 0 ? Math.round((a.score / a.question_count) * 100) : 0,
-        date:          new Date(a.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      }))
       setRecentAttempts(recent)
 
       // ── Recommendations: staleness + upcoming-test proximity ──
@@ -268,5 +197,5 @@ export function useStudyOverview(userId: string | null) {
     useCallback(() => { fetchOverview() }, [fetchOverview])
   )
 
-  return { scheduled, weakestCourse, recentAttempts, recommendations, loading, error, refetch: fetchOverview }
+  return { recentAttempts, recommendations, loading, error, refetch: fetchOverview }
 }

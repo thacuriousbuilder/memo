@@ -1,15 +1,15 @@
 
+
 import { useState, useCallback } from 'react'
 import { useFocusEffect }        from 'expo-router'
 import { supabase }              from '@/lib/supabase'
-import { formatTime, ScopeType, SessionType } from '@/hooks/useReminders'
+import { formatTime, ScopeItem, SessionType } from '@/hooks/useReminders'
 
 // ─────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────
 export interface PlanItem {
   reminderId:    string
-  slotId:        string
   label:         string
   courseId:      string
   courseTitle:   string
@@ -19,9 +19,22 @@ export interface PlanItem {
   timeValue:     number
   sessionType:   SessionType
   questionCount: number | null
-  scopeType:     ScopeType
-  scopeId:       string | null
+  scopeItems:    ScopeItem[]
   done:          boolean
+}
+
+export interface WeekPlanItem {
+  reminderId:    string
+  dayIndex:      number
+  label:         string
+  courseId:      string
+  courseTitle:   string
+  courseEmoji:   string
+  courseColor:   string | null
+  time:          string
+  timeValue:     number
+  sessionType:   SessionType
+  questionCount: number | null
 }
 
 export interface UpcomingExam {
@@ -47,21 +60,6 @@ export interface WeekStats {
   questions:  number
   accuracy:   number
   study_time: string
-}
-
-export interface WeekPlanItem {
-  reminderId:    string
-  slotId:        string
-  dayIndex:      number   // 0=Mon..6=Sun
-  label:         string
-  courseId:      string
-  courseTitle:   string
-  courseEmoji:   string
-  courseColor:   string | null
-  time:          string
-  timeValue:     number
-  sessionType:   SessionType
-  questionCount: number | null
 }
 
 export interface DashboardData {
@@ -100,6 +98,10 @@ function timeToMinutes(time: string): number {
   return h * 60 + m
 }
 
+function mapScopeItems(raw: any[]): ScopeItem[] {
+  return (raw ?? []).map((s: any) => ({ scopeType: s.scope_type, scopeId: s.scope_id, title: s.title }))
+}
+
 // ─────────────────────────────────────────
 // MAIN HOOK
 // ─────────────────────────────────────────
@@ -114,16 +116,16 @@ export function useDashboard(userId: string | null) {
       setLoading(true)
       setError(null)
 
-      const todayDow = new Date().getDay() // 0=Sun..6=Sat
+      const todayDow = new Date().getDay()
       const todayStr = new Date().toDateString()
 
       const [remindersRes, attemptsRes, examsRes, profileRes] = await Promise.all([
         supabase
           .from('reminders')
           .select(`
-            id, label, scope_type, scope_id, days_of_week, is_active,
-            courses ( id, title, emoji, color ),
-            reminder_time_slots ( id, time_of_day, session_type, question_count )
+            id, label, scope_items, days_of_week, is_active,
+            time_of_day, session_type, question_count,
+            courses ( id, title, emoji, color )
           `)
           .eq('user_id', userId)
           .eq('is_active', true),
@@ -160,63 +162,60 @@ export function useDashboard(userId: string | null) {
         (a: any) => new Date(a.created_at).toDateString() === todayStr
       )
 
-      // ── Build today's plan from reminders scheduled for today ──
+      // ── Today's plan — one item per reminder scheduled for today ──
       const planItems: PlanItem[] = []
       for (const r of reminders) {
         if (!r.courses || !(r.days_of_week ?? []).includes(todayDow)) continue
 
-        for (const slot of r.reminder_time_slots ?? []) {
-          const done = todayAttempts.some((a: any) => {
-            if (r.scope_type === 'topic')    return a.lesson_id === r.scope_id
-            if (r.scope_type === 'subtopic') return a.sub_lesson_id === r.scope_id
-            return a.course_id === r.courses.id
-          })
+        const scopeItems = mapScopeItems(r.scope_items)
 
-          planItems.push({
+        const done = todayAttempts.some((a: any) => {
+          if (scopeItems.length === 0) return a.course_id === r.courses.id
+          return scopeItems.some(s =>
+            (s.scopeType === 'topic' && a.lesson_id === s.scopeId) ||
+            (s.scopeType === 'subtopic' && a.sub_lesson_id === s.scopeId)
+          )
+        })
+
+        planItems.push({
+          reminderId:    r.id,
+          label:         r.label,
+          courseId:      r.courses.id,
+          courseTitle:   r.courses.title,
+          courseEmoji:   r.courses.emoji,
+          courseColor:   r.courses.color,
+          time:          formatTime(r.time_of_day),
+          timeValue:     timeToMinutes(r.time_of_day),
+          sessionType:   r.session_type,
+          questionCount: r.question_count,
+          scopeItems,
+          done,
+        })
+      }
+
+      planItems.sort((a, b) => a.timeValue - b.timeValue)
+      const nextUp = planItems.find(i => !i.done) ?? null
+      const laterToday = planItems.filter(i => i !== nextUp)
+
+      // ── Full week plan (all days) ──
+      const weekPlan: WeekPlanItem[] = []
+      for (const r of reminders) {
+        if (!r.courses) continue
+        for (const dow of r.days_of_week ?? []) {
+          const dayIndex = (dow + 6) % 7
+          weekPlan.push({
             reminderId:    r.id,
-            slotId:        slot.id,
+            dayIndex,
             label:         r.label,
             courseId:      r.courses.id,
             courseTitle:   r.courses.title,
             courseEmoji:   r.courses.emoji,
             courseColor:   r.courses.color,
-            time:          formatTime(slot.time_of_day),
-            timeValue:     timeToMinutes(slot.time_of_day),
-            sessionType:   slot.session_type,
-            questionCount: slot.question_count,
-            scopeType:     r.scope_type,
-            scopeId:       r.scope_id,
-            done,
+            time:          formatTime(r.time_of_day),
+            timeValue:     timeToMinutes(r.time_of_day),
+            sessionType:   r.session_type,
+            questionCount: r.question_count,
           })
-        }
-      }
-
-      planItems.sort((a, b) => a.timeValue - b.timeValue)
-
-      const nextUp = planItems.find(i => !i.done) ?? null
-      const laterToday = planItems.filter(i => i !== nextUp)
-
-      const weekPlan: WeekPlanItem[] = []
-      for (const r of reminders) {
-        if (!r.courses) continue
-        for (const dow of r.days_of_week ?? []) {
-          const dayIndex = (dow + 6) % 7 // Sun-first (0=Sun) -> Mon-first (0=Mon)
-          for (const slot of r.reminder_time_slots ?? []) {
-            weekPlan.push({
-              reminderId:    r.id,
-              slotId:        slot.id,
-              dayIndex,
-              label:         r.label,
-              courseId:      r.courses.id,
-              courseTitle:   r.courses.title,
-              courseEmoji:   r.courses.emoji,
-              courseColor:   r.courses.color,
-              time:          formatTime(slot.time_of_day),
-              timeValue:     timeToMinutes(slot.time_of_day),
-              sessionType:   slot.session_type,
-              questionCount: slot.question_count,
-            })
-          }
         }
       }
       weekPlan.sort((a, b) => a.timeValue - b.timeValue)
@@ -246,7 +245,6 @@ export function useDashboard(userId: string | null) {
       const weekHours     = Math.floor(weekQuestions / 60)
       const weekTime      = weekHours > 0 ? `${weekHours}h ${weekQuestions % 60}m` : `${weekQuestions}m`
 
-      
       setData({
         next_up: nextUp,
         later_today: laterToday,

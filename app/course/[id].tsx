@@ -145,34 +145,30 @@ export default function CourseDetailScreen() {
           </TouchableOpacity>
         ) : (
           <View style={{ gap: Spacing.sm }}>
-            {reminders.map(reminder => {
-              const firstSlot = reminder.time_slots[0]
-              return (
-                <TouchableOpacity
-                key={reminder.id}
-                style={styles.reminderRow}
-                onPress={() => router.push(`/course/${course.id}/reminder/new?reminderId=${reminder.id}`)}
-                activeOpacity={0.7}
-              >
-                  <View style={styles.reminderIcon}>
-                    <Ionicons name="notifications" size={18} color={Colors.primary} />
-                  </View>
-                  <View style={styles.examInfo}>
-                    <Text style={styles.examTitle}>{reminder.label}</Text>
-                    <Text style={styles.examDate}>
-                      {firstSlot ? formatTime(firstSlot.time_of_day) : '—'} · {formatDaysOfWeek(reminder.days_of_week)}
-                      {reminder.time_slots.length > 1 ? ` +${reminder.time_slots.length - 1} more` : ''}
-                    </Text>
-                  </View>
-                  <Switch
-                    value={reminder.is_active}
-                    onValueChange={(v) => handleToggleReminder(reminder.id, v)}
-                    trackColor={{ false: Colors.border, true: Colors.primary }}
-                    thumbColor="#fff"
-                  />
-                </TouchableOpacity>
-              )
-            })}
+            {reminders.map(reminder => (
+            <TouchableOpacity
+              key={reminder.id}
+              style={styles.reminderRow}
+              onPress={() => router.push(`/course/${course.id}/reminder/new?reminderId=${reminder.id}`)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.reminderIcon}>
+                <Ionicons name="notifications" size={18} color={Colors.primary} />
+              </View>
+              <View style={styles.examInfo}>
+                <Text style={styles.examTitle}>{reminder.label}</Text>
+                <Text style={styles.examDate}>
+                  {formatTime(reminder.timeOfDay)} · {formatDaysOfWeek(reminder.daysOfWeek)}
+                </Text>
+              </View>
+              <Switch
+                value={reminder.isActive}
+                onValueChange={(v) => handleToggleReminder(reminder.id, v)}
+                trackColor={{ false: Colors.border, true: Colors.primary }}
+                thumbColor="#fff"
+              />
+            </TouchableOpacity>
+          ))}
           </View>
         )}
       </View>

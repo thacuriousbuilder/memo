@@ -1,10 +1,12 @@
 
-
 import { useState, useCallback } from 'react'
 import * as WebBrowser           from 'expo-web-browser'
+import * as SecureStore          from 'expo-secure-store'
 import { supabase }              from '@/lib/supabase'
 
 WebBrowser.maybeCompleteAuthSession()
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL!
 
 // ─────────────────────────────────────────
 // TYPES
@@ -20,6 +22,59 @@ export interface DriveFile {
 export interface BreadcrumbEntry {
   id:   string
   name: string
+}
+
+interface StoredCredentials {
+  providerToken: string
+  refreshToken:  string | null
+  expiresAt:     number
+}
+
+// ─────────────────────────────────────────
+// SECURE STORAGE — Drive credentials
+// ─────────────────────────────────────────
+const KEYS = {
+  token:   'drive_provider_token',
+  refresh: 'drive_refresh_token',
+  expiry:  'drive_token_expiry',
+}
+
+async function saveCredentials(providerToken: string, refreshToken: string | null, expiresInSec: number) {
+  const expiresAt = Date.now() + expiresInSec * 1000
+  await SecureStore.setItemAsync(KEYS.token, providerToken)
+  await SecureStore.setItemAsync(KEYS.expiry, String(expiresAt))
+  if (refreshToken) {
+    await SecureStore.setItemAsync(KEYS.refresh, refreshToken)
+  }
+}
+
+async function loadCredentials(): Promise<StoredCredentials | null> {
+  const [providerToken, refreshToken, expiryStr] = await Promise.all([
+    SecureStore.getItemAsync(KEYS.token),
+    SecureStore.getItemAsync(KEYS.refresh),
+    SecureStore.getItemAsync(KEYS.expiry),
+  ])
+  if (!providerToken || !expiryStr) return null
+  return { providerToken, refreshToken, expiresAt: Number(expiryStr) }
+}
+
+async function clearCredentials() {
+  await SecureStore.deleteItemAsync(KEYS.token)
+  await SecureStore.deleteItemAsync(KEYS.refresh)
+  await SecureStore.deleteItemAsync(KEYS.expiry)
+}
+
+// ─────────────────────────────────────────
+// REFRESH ACCESS TOKEN — via backend proxy
+// ─────────────────────────────────────────
+async function refreshAccessToken(refreshToken: string): Promise<{ access_token: string; expires_in: number }> {
+  const res = await fetch(`${API_URL}/auth/google/refresh`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ refresh_token: refreshToken }),
+  })
+  if (!res.ok) throw new Error('Failed to refresh Drive access.')
+  return res.json()
 }
 
 // ─────────────────────────────────────────
@@ -87,21 +142,37 @@ export function useGoogleDrive() {
     }
   }, [])
 
-  // ── Check existing session ──
-  const checkExistingSession = useCallback(async () => {
+  // ── Restore a previous session silently, refreshing if needed ──
+  const restoreSession = useCallback(async (): Promise<boolean> => {
     try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session?.provider_token) {
-        setToken(session.provider_token)
-        setBreadcrumbs([{ id: 'root', name: 'Drive' }])
-        await fetchFiles(session.provider_token, 'root')
-        return true
+      const creds = await loadCredentials()
+      if (!creds) return false
+
+      const isExpired = Date.now() >= creds.expiresAt - 60_000
+
+      let activeToken = creds.providerToken
+
+      if (isExpired) {
+        if (!creds.refreshToken) {
+          await clearCredentials()
+          return false
+        }
+        const refreshed = await refreshAccessToken(creds.refreshToken)
+        activeToken = refreshed.access_token
+        await saveCredentials(activeToken, creds.refreshToken, refreshed.expires_in)
       }
-      return false
+
+      setToken(activeToken)
+      setBreadcrumbs([{ id: 'root', name: 'Drive' }])
+      await fetchFiles(activeToken, 'root')
+      return true
     } catch {
+      await clearCredentials()
       return false
     }
   }, [fetchFiles])
+
+  const checkExistingSession = restoreSession
 
   // ── Sign in ──
   const signIn = useCallback(async () => {
@@ -109,13 +180,8 @@ export function useGoogleDrive() {
       setError(null)
       setLoading(true)
 
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session?.provider_token) {
-        setToken(session.provider_token)
-        setBreadcrumbs([{ id: 'root', name: 'Drive' }])
-        await fetchFiles(session.provider_token, 'root')
-        return
-      }
+      const restored = await restoreSession()
+      if (restored) return
 
       const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -123,6 +189,10 @@ export function useGoogleDrive() {
           scopes:              'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/documents.readonly',
           redirectTo:          'memo://auth/callback',
           skipBrowserRedirect: true,
+          queryParams: {
+            access_type: 'offline',
+            prompt:      'consent',
+          },
         },
       })
 
@@ -145,6 +215,10 @@ export function useGoogleDrive() {
         const params = new URLSearchParams(hash ?? '')
 
         const providerToken = params.get('provider_token')
+        const refreshToken  = params.get('provider_refresh_token')
+        const expiresInStr  = params.get('expires_in')
+        const expiresIn     = expiresInStr ? Number(expiresInStr) : 3600
+
 
         if (!providerToken) {
           throw new Error(
@@ -152,6 +226,9 @@ export function useGoogleDrive() {
             'is enabled in Supabase Google provider settings.'
           )
         }
+
+        await saveCredentials(providerToken, refreshToken, expiresIn)
+      
 
         setToken(providerToken)
         setBreadcrumbs([{ id: 'root', name: 'Drive' }])
@@ -162,7 +239,7 @@ export function useGoogleDrive() {
     } finally {
       setLoading(false)
     }
-  }, [fetchFiles])
+  }, [fetchFiles, restoreSession])
 
   // ── Navigate into a folder ──
   const navigateToFolder = useCallback((folder: DriveFile) => {
@@ -212,24 +289,25 @@ export function useGoogleDrive() {
 
       if (!res.ok) throw new Error('Failed to download file from Drive.')
 
-        const blob = await res.blob()
-        const ext  = mimeType.includes('pdf')  ? '.pdf'
-                   : mimeType.includes('docx') ? '.docx'
-                   : '.txt'
-        
-        // RN's Blob doesn't support arrayBuffer() — read via FileReader instead
-        const arrayBuffer: ArrayBuffer = await new Promise((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onload  = () => resolve(reader.result as ArrayBuffer)
-          reader.onerror = () => reject(new Error('Failed to read downloaded file.'))
-          reader.readAsArrayBuffer(blob)
-        })
-        
-        const { File, Paths } = await import('expo-file-system/next')
-        const tempFile = new File(Paths.cache, `drive_${Date.now()}${ext}`)
-        await tempFile.write(new Uint8Array(arrayBuffer))
-        
-        return { uri: tempFile.uri, name: fileName, mimeType }
+      const blob = await res.blob()
+      const ext  = mimeType.includes('pdf')
+        ? '.pdf'
+        : mimeType.includes('wordprocessingml') || mimeType.includes('msword')
+        ? '.docx'
+        : '.txt'
+
+      const arrayBuffer: ArrayBuffer = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload  = () => resolve(reader.result as ArrayBuffer)
+        reader.onerror = () => reject(new Error('Failed to read downloaded file.'))
+        reader.readAsArrayBuffer(blob)
+      })
+
+      const { File, Paths } = await import('expo-file-system/next')
+      const tempFile = new File(Paths.cache, `drive_${Date.now()}${ext}`)
+      await tempFile.write(new Uint8Array(arrayBuffer))
+
+      return { uri: tempFile.uri, name: fileName, mimeType }
     } catch (err: any) {
       setError(err.message)
       return null
@@ -238,7 +316,8 @@ export function useGoogleDrive() {
     }
   }, [token])
 
-  const signOut = useCallback(() => {
+  const signOut = useCallback(async () => {
+    await clearCredentials()
     setToken(null)
     setFiles([])
     setBreadcrumbs([{ id: 'root', name: 'Drive' }])

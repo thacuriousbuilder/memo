@@ -55,7 +55,7 @@ async function startPlanItem(item: PlanItem) {
     return
   }
   try {
-    if (item.scopeType === 'all') {
+    if (item.scopeItems.length === 0) {
       router.push({
         pathname: '/study/[id]',
         params: {
@@ -65,7 +65,7 @@ async function startPlanItem(item: PlanItem) {
       })
       return
     }
-    const noteIds = await resolveReminderNoteIds(item.scopeType, item.scopeId)
+    const noteIds = await resolveReminderNoteIds(item.scopeItems)
     if (!noteIds.length) {
       Alert.alert('No materials', 'This reminder\'s materials couldn\'t be found.')
       return
@@ -82,14 +82,29 @@ async function startPlanItem(item: PlanItem) {
     Alert.alert('Error', err.message)
   }
 }
-
 // ─────────────────────────────────────────
 // NEXT UP TODAY
 // ─────────────────────────────────────────
+
 function NextUpCard({ item, laterCount }: { item: PlanItem | null; laterCount: number }) {
-  if (!item) return null
+  if (!item) return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionHeaderLeft}>
+          <View style={styles.dot} />
+          <Text style={styles.sectionTitle}>NEXT UP TODAY</Text>
+        </View>
+      </View>
+      <View style={styles.emptyNextCard}>
+        <Ionicons name="checkmark-circle-outline" size={28} color={Colors.textMuted} />
+        <Text style={styles.emptyNextTitle}>Nothing scheduled today</Text>
+        <Text style={styles.emptyNextSub}>Check your Weekly Schedule below, or set a new reminder.</Text>
+      </View>
+    </View>
+  )
+
   const total = laterCount + 1
-  const done  = 0 // next_up is by definition not-done
+  const done  = 0
 
   return (
     <View style={styles.section}>
@@ -156,7 +171,7 @@ function LaterTodaySection({ items }: { items: PlanItem[] }) {
         <View style={styles.list}>
           {items.map((item, index) => (
             <TouchableOpacity
-              key={item.slotId}
+            key={item.reminderId}
               style={[styles.row, index < items.length - 1 && styles.rowBorder]}
               activeOpacity={item.done ? 1 : 0.8}
               disabled={item.done}
@@ -299,7 +314,7 @@ function WeeklyScheduleSection({ items }: { items: WeekPlanItem[] }) {
           ) : (
             <View style={styles.cardList}>
             {dayItems.map((item) => (
-              <View key={item.slotId + item.reminderId} style={styles.cardRow}>
+              <View key={item.reminderId + item.dayIndex} style={styles.cardRow}>
                 <View style={[styles.rowIconBadge, { backgroundColor: (item.courseColor ?? Colors.primary) + '22' }]}>
                   <MaterialCommunityIcons name={item.courseEmoji as any} size={20} color={item.courseColor ?? Colors.primary} />
                 </View>
@@ -350,8 +365,12 @@ export default function HomeScreen() {
     </View>
   )
 
-  const hasContent = data && (data.next_up || data.later_today.length > 0 || data.upcoming_exams.length > 0)
-
+  const hasContent = data && (
+    data.next_up ||
+    data.later_today.length > 0 ||
+    data.upcoming_exams.length > 0 ||
+    data.week_plan.length > 0
+  )
   return (
     <View style={styles.root}>
      <View style={styles.fixedHeader}>
@@ -372,8 +391,8 @@ export default function HomeScreen() {
           <EmptyHome />
         ) : (
           <>
-            <NextUpCard item={data?.next_up ?? null} laterCount={data?.later_today.length ?? 0} />
-            <LaterTodaySection items={data?.later_today ?? []} />
+          <NextUpCard item={data?.next_up ?? null} laterCount={data?.later_today.length ?? 0} />
+          <LaterTodaySection items={data?.later_today ?? []} />
             <UpcomingTestsSection exams={data?.upcoming_exams ?? []} />
             <WeeklyScheduleSection items={data?.week_plan ?? []} />
           </>
@@ -471,7 +490,7 @@ dayChipCountText: { fontSize: Typography.xs, fontWeight: Typography.bold, color:
 dayChipCountTextSelected: { color: '#fff' },
 dayHeading: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary, marginTop: Spacing.sm },
 dayItemTime: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.textSecondary },
-emptyDayBox: { ...CardBase, alignItems: 'center', paddingVertical: Spacing.lg, borderStyle: 'dashed' },
+emptyDayBox: { ...CardBase, alignItems: 'center', paddingVertical: Spacing.lg },
 emptyDayText: { fontSize: Typography.sm, color: Colors.textMuted },
 cardList: { gap: Spacing.sm },
 cardRow: {
@@ -488,4 +507,10 @@ logoText: {
   fontSize: Typography.xl, fontWeight: Typography.extrabold, color: Colors.textPrimary,
   letterSpacing: 1,
 },
+emptyNextCard: {
+  ...CardBase, alignItems: 'center', gap: Spacing.xs,
+  paddingVertical: Spacing.xl,
+},
+emptyNextTitle: { fontSize: Typography.base, fontWeight: Typography.medium, color: Colors.textSecondary },
+emptyNextSub: { fontSize: Typography.xs, color: Colors.textMuted, textAlign: 'center' },
 })

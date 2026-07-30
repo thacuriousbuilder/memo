@@ -40,18 +40,25 @@ export interface AttemptAnswer {
   correctText:    string
   explanation:    string | null
 }
-const GENERATION_BANK_SIZE = 15
+
+function pickBankSize(parsedText: string): 5 | 10 | 15 {
+  const wordCount = parsedText.trim().split(/\s+/).length
+  if (wordCount < 400)  return 5
+  if (wordCount < 1200) return 10
+  return 15
+}
 
 async function ensureQuestionsExist(
   noteIds: string[],
   userId:  string
 ): Promise<void> {
-  if (!noteIds.length) return
+  const uniqueNoteIds = Array.from(new Set(noteIds))
+  if (!uniqueNoteIds.length) return
 
   const { data: notes } = await supabase
     .from('notes')
     .select('id, parsed_text, lesson_id, sub_lesson_id')
-    .in('id', noteIds)
+    .in('id', uniqueNoteIds)
 
   if (!notes?.length) return
 
@@ -73,7 +80,7 @@ async function ensureQuestionsExist(
       QuizAPI.generate({
         note_id:        note.id,
         user_id:        userId,
-        question_count: GENERATION_BANK_SIZE,
+        question_count: pickBankSize(note.parsed_text),
         lesson_id:      note.lesson_id,
         sub_lesson_id:  note.sub_lesson_id,
       }).catch(err => {
@@ -311,13 +318,11 @@ export async function saveQuizAttempt(params: {
 }): Promise<{ attemptId: string; passed: boolean }> {
   const passed  = params.score / params.questionCount >= 0.8
 
-  const lessonId    = ['lesson','lesson_all','section','course','quick','practice']
-    .includes(params.mode) ? params.id : null
-  const subLessonId = params.mode === 'sublesson' ? params.id : null
+  const lessonId = ['lesson', 'lesson_all', 'practice']
+  .includes(params.mode) ? params.id : null
+const subLessonId = params.mode === 'sublesson' ? params.id : null
 
-  // course/quick modes already have the course id directly in params.id —
-  // no lookup needed. Everything else resolves upward through lesson/sub-lesson.
-  const courseId = params.mode === 'quick' && params.id === 'all'
+const courseId = params.mode === 'quick' && params.id === 'all'
   ? null
   : ['course', 'quick', 'custom'].includes(params.mode)
     ? params.id

@@ -145,9 +145,9 @@ function SetupScreen({
   const [selected, setSelected] = useState<QuizCount | null>(null)
 
   const counts: { value: QuizCount; label: string; desc: string }[] = [
-    { value: 5,  label: '5 Questions',  desc: 'Quick review — ~5 min'  },
-    { value: 10, label: '10 Questions', desc: 'Standard — ~10 min'     },
-    { value: 15, label: '15 Questions', desc: 'Deep study — ~15 min'   },
+    { value: 5,  label: '5 Questions',  desc: 'Quick review  ~5 min'  },
+    { value: 10, label: '10 Questions', desc: 'Standard ~10 min'     },
+    { value: 15, label: '15 Questions', desc: 'Deep study ~15 min'   },
   ]
 
   const modeLabel: Record<QuizMode, string> = {

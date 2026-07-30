@@ -7,25 +7,24 @@ import { supabase }       from '@/lib/supabase'
 // ─────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────
-export type ScopeType   = 'all' | 'folder' | 'topic' | 'subtopic'
+export type ScopeType   = 'folder' | 'topic' | 'subtopic'
 export type SessionType = 'quiz' | 'blurt'
 
-export interface ReminderTimeSlot {
-  id:             string
-  time_of_day:    string  // 'HH:MM:SS'
-  session_type:   SessionType
-  question_count: number | null
-  order_index:    number
+export interface ScopeItem {
+  scopeType: ScopeType
+  scopeId:   string
+  title:     string
 }
 
 export interface Reminder {
-  id:            string
-  label:         string
-  scope_type:    ScopeType
-  scope_id:      string | null
-  days_of_week:  number[]
-  is_active:     boolean
-  time_slots:    ReminderTimeSlot[]
+  id:             string
+  label:          string
+  scopeItems:     ScopeItem[]   // empty array = All materials
+  daysOfWeek:     number[]
+  isActive:       boolean
+  timeOfDay:      string        // 'HH:MM:SS'
+  sessionType:    SessionType
+  questionCount:  number | null
 }
 
 // ─────────────────────────────────────────
@@ -51,25 +50,14 @@ export function useReminders(
 
       const { data, error: err } = await supabase
         .from('reminders')
-        .select(`
-          id, label, scope_type, scope_id, days_of_week, is_active,
-          reminder_time_slots ( id, time_of_day, session_type, question_count, order_index )
-        `)
+        .select('id, label, scope_items, days_of_week, is_active, time_of_day, session_type, question_count')
         .eq('course_id', courseId)
         .eq('user_id', userId)
         .order('created_at', { ascending: true })
 
       if (err) throw err
 
-      setReminders((data ?? []).map((r: any) => ({
-        id:           r.id,
-        label:        r.label,
-        scope_type:   r.scope_type,
-        scope_id:     r.scope_id,
-        days_of_week: r.days_of_week ?? [],
-        is_active:    r.is_active,
-        time_slots:   (r.reminder_time_slots ?? []).sort((a: any, b: any) => a.order_index - b.order_index),
-      })))
+      setReminders((data ?? []).map(mapRow))
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -85,149 +73,104 @@ export function useReminders(
 }
 
 // ─────────────────────────────────────────
-// CREATE REMINDER (with time slots)
+// ROW MAPPER
+// ─────────────────────────────────────────
+function mapRow(r: any): Reminder {
+  return {
+    id:            r.id,
+    label:         r.label,
+    scopeItems:    (r.scope_items ?? []).map((s: any) => ({
+      scopeType: s.scope_type, scopeId: s.scope_id, title: s.title,
+    })),
+    daysOfWeek:    r.days_of_week ?? [],
+    isActive:      r.is_active,
+    timeOfDay:     r.time_of_day,
+    sessionType:   r.session_type,
+    questionCount: r.question_count,
+  }
+}
+
+// ─────────────────────────────────────────
+// CREATE REMINDER
 // ─────────────────────────────────────────
 export async function createReminder(params: {
-  userId:      string
-  courseId:    string
-  label:       string
-  scopeType:   ScopeType
-  scopeId:     string | null
-  daysOfWeek:  number[]
-  timeSlots: {
-    time:          string  // 'HH:MM:SS'
-    sessionType:   SessionType
-    questionCount: number | null
-  }[]
+  userId:        string
+  courseId:      string
+  label:         string
+  scopeItems:    ScopeItem[]
+  daysOfWeek:    number[]
+  time:          string
+  sessionType:   SessionType
+  questionCount: number | null
 }): Promise<void> {
-  const { data: reminder, error: reminderErr } = await supabase
+  const { error } = await supabase
     .from('reminders')
     .insert({
-      user_id:      params.userId,
-      course_id:    params.courseId,
-      label:        params.label,
-      scope_type:   params.scopeType,
-      scope_id:     params.scopeId,
-      days_of_week: params.daysOfWeek,
+      user_id:        params.userId,
+      course_id:      params.courseId,
+      label:          params.label,
+      scope_items:    params.scopeItems.map(s => ({ scope_type: s.scopeType, scope_id: s.scopeId, title: s.title })),
+      days_of_week:   params.daysOfWeek,
+      time_of_day:    params.time,
+      session_type:   params.sessionType,
+      question_count: params.sessionType === 'quiz' ? params.questionCount : null,
     })
-    .select('id')
-    .single()
-
-  if (reminderErr) throw reminderErr
-
-  if (params.timeSlots.length > 0) {
-    const { error: slotsErr } = await supabase
-      .from('reminder_time_slots')
-      .insert(params.timeSlots.map((slot, idx) => ({
-        reminder_id:    reminder.id,
-        time_of_day:    slot.time,
-        session_type:   slot.sessionType,
-        question_count: slot.sessionType === 'quiz' ? slot.questionCount : null,
-        order_index:    idx,
-      })))
-    if (slotsErr) throw slotsErr
-  }
+  if (error) throw error
 }
 
 // ─────────────────────────────────────────
 // FETCH SINGLE REMINDER (for edit pre-fill)
 // ─────────────────────────────────────────
 export async function getReminder(reminderId: string): Promise<Reminder | null> {
-    const { data, error } = await supabase
-      .from('reminders')
-      .select(`
-        id, label, scope_type, scope_id, days_of_week, is_active,
-        reminder_time_slots ( id, time_of_day, session_type, question_count, order_index )
-      `)
-      .eq('id', reminderId)
-      .single()
-  
-    if (error) throw error
-    if (!data) return null
-  
-    return {
-      id:           data.id,
-      label:        data.label,
-      scope_type:   data.scope_type,
-      scope_id:     data.scope_id,
-      days_of_week: data.days_of_week ?? [],
-      is_active:    data.is_active,
-      time_slots:   (data.reminder_time_slots ?? []).sort((a: any, b: any) => a.order_index - b.order_index),
-    }
-  }
-  
-  // ─────────────────────────────────────────
-  // UPDATE REMINDER — replace all slots (simplest correct approach
-  // given the nesting; no diffing of individual slot changes)
-  // ─────────────────────────────────────────
-  export async function updateReminder(params: {
-    reminderId: string
-    label:      string
-    scopeType:  ScopeType
-    scopeId:    string | null
-    daysOfWeek: number[]
-    timeSlots: {
-      time:          string
-      sessionType:   SessionType
-      questionCount: number | null
-    }[]
-  }): Promise<void> {
-    const { error: updateErr } = await supabase
-      .from('reminders')
-      .update({
-        label:        params.label,
-        scope_type:   params.scopeType,
-        scope_id:     params.scopeId,
-        days_of_week: params.daysOfWeek,
-      })
-      .eq('id', params.reminderId)
-  
-    if (updateErr) throw updateErr
-  
-    const { error: deleteErr } = await supabase
-      .from('reminder_time_slots')
-      .delete()
-      .eq('reminder_id', params.reminderId)
-  
-    if (deleteErr) throw deleteErr
-  
-    if (params.timeSlots.length > 0) {
-      const { error: insertErr } = await supabase
-        .from('reminder_time_slots')
-        .insert(params.timeSlots.map((slot, idx) => ({
-          reminder_id:    params.reminderId,
-          time_of_day:    slot.time,
-          session_type:   slot.sessionType,
-          question_count: slot.sessionType === 'quiz' ? slot.questionCount : null,
-          order_index:    idx,
-        })))
-      if (insertErr) throw insertErr
-    }
-  }
+  const { data, error } = await supabase
+    .from('reminders')
+    .select('id, label, scope_items, days_of_week, is_active, time_of_day, session_type, question_count')
+    .eq('id', reminderId)
+    .single()
 
-  // ─────────────────────────────────────────
-// RESOLVE A REMINDER'S SCOPE INTO NOTE IDS
-// Mirrors the note-resolution logic in useQuiz.ts,
-// but keyed off scope_type/scope_id instead of a QuizMode.
+  if (error) throw error
+  if (!data) return null
+  return mapRow(data)
+}
+
 // ─────────────────────────────────────────
-export async function resolveReminderNoteIds(
-  scopeType: ScopeType,
-  scopeId:   string | null
-): Promise<string[]> {
-  if (scopeType === 'all' || !scopeId) {
-    // 'all' scope is resolved by the caller (course-level flat notes + everything under it)
-    // since this function doesn't know which course it belongs to on its own.
-    return []
-  }
+// UPDATE REMINDER
+// ─────────────────────────────────────────
+export async function updateReminder(params: {
+  reminderId:    string
+  label:         string
+  scopeItems:    ScopeItem[]
+  daysOfWeek:    number[]
+  time:          string
+  sessionType:   SessionType
+  questionCount: number | null
+}): Promise<void> {
+  const { error } = await supabase
+    .from('reminders')
+    .update({
+      label:          params.label,
+      scope_items:    params.scopeItems.map(s => ({ scope_type: s.scopeType, scope_id: s.scopeId, title: s.title })),
+      days_of_week:   params.daysOfWeek,
+      time_of_day:    params.time,
+      session_type:   params.sessionType,
+      question_count: params.sessionType === 'quiz' ? params.questionCount : null,
+    })
+    .eq('id', params.reminderId)
+  if (error) throw error
+}
 
-  if (scopeType === 'subtopic') {
-    const { data } = await supabase.from('notes').select('id').eq('sub_lesson_id', scopeId)
+// ─────────────────────────────────────────
+// RESOLVE A SINGLE SCOPE ITEM INTO NOTE IDS
+// ─────────────────────────────────────────
+async function resolveScopeItemNoteIds(item: ScopeItem): Promise<string[]> {
+  if (item.scopeType === 'subtopic') {
+    const { data } = await supabase.from('notes').select('id').eq('sub_lesson_id', item.scopeId)
     return (data ?? []).map(n => n.id)
   }
 
-  if (scopeType === 'topic') {
-    const { data: ownNotes } = await supabase.from('notes').select('id').eq('lesson_id', scopeId)
-    const { data: subs } = await supabase.from('sub_lessons').select('id').eq('lesson_id', scopeId)
+  if (item.scopeType === 'topic') {
+    const { data: ownNotes } = await supabase.from('notes').select('id').eq('lesson_id', item.scopeId)
+    const { data: subs } = await supabase.from('sub_lessons').select('id').eq('lesson_id', item.scopeId)
     const subIds = (subs ?? []).map(s => s.id)
     const subNotes = subIds.length
       ? (await supabase.from('notes').select('id').in('sub_lesson_id', subIds)).data ?? []
@@ -235,17 +178,32 @@ export async function resolveReminderNoteIds(
     return [...(ownNotes ?? []).map(n => n.id), ...subNotes.map(n => n.id)]
   }
 
-  if (scopeType === 'folder') {
-    const { data: lessons } = await supabase.from('lessons').select('id').eq('section_id', scopeId)
+  if (item.scopeType === 'folder') {
+    const { data: lessons } = await supabase.from('lessons').select('id').eq('section_id', item.scopeId)
     const all: string[] = []
     for (const l of lessons ?? []) {
-      all.push(...await resolveReminderNoteIds('topic', l.id))
+      all.push(...await resolveScopeItemNoteIds({ scopeType: 'topic', scopeId: l.id, title: '' }))
     }
     return all
   }
 
   return []
 }
+
+// ─────────────────────────────────────────
+// RESOLVE A REMINDER'S FULL SCOPE INTO NOTE IDS
+// Empty scopeItems means "All materials" — resolved by
+// the caller using the course-wide 'course' quiz mode instead,
+// since this function has no course context of its own.
+// ─────────────────────────────────────────
+export async function resolveReminderNoteIds(scopeItems: ScopeItem[]): Promise<string[]> {
+  if (scopeItems.length === 0) return []
+
+  const results = await Promise.all(scopeItems.map(resolveScopeItemNoteIds))
+  const unique = new Set(results.flat())
+  return Array.from(unique)
+}
+
 // ─────────────────────────────────────────
 // TOGGLE ACTIVE
 // ─────────────────────────────────────────

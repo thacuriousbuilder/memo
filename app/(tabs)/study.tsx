@@ -8,7 +8,7 @@ import { router } from 'expo-router'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
 import { useSession } from '@/hooks/useSession'
-import { useStudyOverview, Recommendation } from '@/hooks/useStudyOverview'
+import { useStudyOverview, Recommendation, RecentAttempt } from '@/hooks/useStudyOverview'
 
 // ─────────────────────────────────────────
 // RECOMMENDATION ROW
@@ -54,10 +54,10 @@ function PracticeRow({
 // ─────────────────────────────────────────
 // RECENT ROW
 // ─────────────────────────────────────────
-function RecentRow({ attempt }: { attempt: any }) {
+function RecentRow({ attempt, onPress }: { attempt: any; onPress: () => void }) {
   const color = attempt.scorePct >= 80 ? Colors.success : attempt.scorePct >= 60 ? Colors.warning : Colors.error
   return (
-    <TouchableOpacity style={styles.row} activeOpacity={0.7}>
+    <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={onPress}>
       <View style={[styles.iconBadge, { backgroundColor: (attempt.courseColor ?? Colors.primary) + '22' }]}>
         <MaterialCommunityIcons name={attempt.courseIcon as any} size={20} color={attempt.courseColor ?? Colors.primary} />
       </View>
@@ -72,9 +72,20 @@ function RecentRow({ attempt }: { attempt: any }) {
   )
 }
 
+// ─────────────────────────────────────────
+// QUICK QUIZ COUNT SHEET
+// ─────────────────────────────────────────
+function QuickQuizCountRow({ count, onPress }: { count: number; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.countChip} onPress={onPress} activeOpacity={0.7}>
+      <Text style={styles.countChipText}>{count}</Text>
+    </TouchableOpacity>
+  )
+}
+
 export default function StudyScreen() {
   const { user } = useSession()
-  const { recommendations, weakestCourse, recentAttempts, loading } = useStudyOverview(user?.id ?? null)
+  const { recommendations, recentAttempts, loading } = useStudyOverview(user?.id ?? null)
 
   const handleRecommendationTap = (rec: Recommendation) => {
     if (!rec.noteIds.length) {
@@ -88,6 +99,24 @@ export default function StudyScreen() {
         mode: 'custom',
         title: rec.title,
         noteIds: JSON.stringify(rec.noteIds),
+      },
+    })
+  }
+
+  const startQuickQuiz = (count: number) => {
+    router.push({
+      pathname: '/study/[id]',
+      params: { id: 'all', mode: 'quick', title: 'Quick Quiz', presetCount: String(count) },
+    })
+  }
+    
+  const handleRetake = (attempt: RecentAttempt) => {
+    router.push({
+      pathname: '/study/[id]',
+      params: {
+        id: attempt.targetId,
+        mode: attempt.mode,
+        title: attempt.scopeLabel,
       },
     })
   }
@@ -129,40 +158,35 @@ export default function StudyScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>PRACTICE</Text>
           <View style={styles.list}>
-            <PracticeRow
-              icon="sparkles-outline"
-              title="Quick Quiz"
-              subtitle="10 random questions from your courses"
-              onPress={() => router.push({ pathname: '/study/[id]', params: { id: 'all', mode: 'quick', title: 'Quick Quiz' } })}
-            />
+            <View style={[styles.row, { alignItems: 'flex-start' }]}>
+              <View style={styles.practiceIconBadge}>
+                <Ionicons name="sparkles-outline" size={20} color={Colors.primary} />
+              </View>
+              <View style={styles.rowInfo}>
+                <Text style={styles.rowTitle}>Quick Quiz</Text>
+                <Text style={styles.rowSub}>Random questions from your courses</Text>
+                <View style={styles.countRow}>
+                  <QuickQuizCountRow count={5} onPress={() => startQuickQuiz(5)} />
+                  <QuickQuizCountRow count={10} onPress={() => startQuickQuiz(10)} />
+                  <QuickQuizCountRow count={25} onPress={() => startQuickQuiz(25)} />
+                </View>
+              </View>
+            </View>
             <View style={styles.divider} />
             <PracticeRow
               icon="refresh"
               title="Quick Blurt"
-              subtitle="Free-recall a random topic from your courses"
-              onPress={() => Alert.alert('Coming soon', 'Blurt sessions aren\'t available yet.')}
+              subtitle="Coming soon — free-recall a topic from memory"
+              disabled
+              onPress={() => {}}
             />
-            <View style={styles.divider} />
             <PracticeRow
-              icon="locate-outline"
-              title="Weak spots"
-              subtitle={weakestCourse ? `Focus on ${weakestCourse.title} — last score ${weakestCourse.gradePct}%` : 'No quiz history yet'}
-              disabled={!weakestCourse}
-              onPress={() => weakestCourse && router.push({
-                pathname: '/study/[id]',
-                params: { id: weakestCourse.courseId, mode: 'course', title: weakestCourse.title },
-              })}
-            />
-            <View style={styles.divider} />
-            <PracticeRow
-              icon="shuffle"
-              title="Marathon"
-              subtitle="25-question mixed review across everything"
-              onPress={() => router.push({
-                pathname: '/study/[id]',
-                params: { id: 'all', mode: 'quick', title: 'Marathon', presetCount: '25' },
-              })}
-            />
+          icon="refresh-circle-outline"
+          title="Review Mistakes"
+          subtitle="Retry the questions you've gotten wrong"
+          onPress={() => router.push({ pathname: '/study/[id]', params: { id: 'all', mode: 'review', title: 'Review Mistakes' } })}
+        />
+        <View style={styles.divider} />
           </View>
         </View>
 
@@ -176,12 +200,12 @@ export default function StudyScreen() {
             </View>
           ) : (
             <View style={styles.list}>
-              {recentAttempts.map((a, idx) => (
-                <View key={a.id}>
-                  <RecentRow attempt={a} />
-                  {idx < recentAttempts.length - 1 && <View style={styles.divider} />}
-                </View>
-              ))}
+             {recentAttempts.map((a, idx) => (
+            <View key={a.id}>
+              <RecentRow attempt={a} onPress={() => handleRetake(a)} />
+              {idx < recentAttempts.length - 1 && <View style={styles.divider} />}
+            </View>
+          ))}
             </View>
           )}
         </View>
@@ -210,7 +234,13 @@ const styles = StyleSheet.create({
   rowMeta: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 1 },
   reasonText: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.textMuted, marginRight: 4 },
   scoreText: { fontSize: Typography.base, fontWeight: Typography.bold, marginRight: 4 },
-  emptyBox: { ...CardBase, alignItems: 'center', gap: Spacing.xs, paddingVertical: Spacing.xl, },
+  emptyBox: { ...CardBase, alignItems: 'center', gap: Spacing.xs, paddingVertical: Spacing.xl },
   emptyText: { fontSize: Typography.base, fontWeight: Typography.medium, color: Colors.textSecondary },
   emptySubtext: { fontSize: Typography.xs, color: Colors.textMuted, textAlign: 'center' },
+  countRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm },
+  countChip: {
+    borderWidth: 1, borderColor: Colors.border, borderRadius: Radius.full,
+    paddingVertical: Spacing.xs, paddingHorizontal: Spacing.md, backgroundColor: Colors.cardElevated,
+  },
+  countChipText: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: Colors.primary },
 })
