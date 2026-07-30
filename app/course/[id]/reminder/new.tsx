@@ -37,16 +37,16 @@ function formatTime12h(date: Date): string {
 // SCOPE ROW (checkbox)
 // ─────────────────────────────────────────
 function ScopeRow({
-  icon, label, indent, checked, onPress,
+  icon, label, indent, checked, onPress, disabled,
 }: {
   icon: React.ReactNode; label: string; indent?: number
-  checked: boolean; onPress: () => void
+  checked: boolean; onPress: () => void; disabled?: boolean
 }) {
   return (
     <TouchableOpacity
-      style={[styles.scopeRow, { paddingLeft: Spacing.md + (indent ?? 0) }]}
+      style={[styles.scopeRow, { paddingLeft: Spacing.md + (indent ?? 0) }, disabled && styles.scopeRowDisabled]}
       onPress={onPress}
-      activeOpacity={0.7}
+      activeOpacity={disabled ? 1 : 0.7}
     >
       {icon}
       <Text style={styles.scopeLabel} numberOfLines={1}>{label}</Text>
@@ -89,9 +89,14 @@ export default function NewReminderScreen() {
     }).catch(() => setPrefilling(false))
   }, [reminderId])
 
-  const toggleAllMaterials = () => setScopeItems([])
+  const toggleAllMaterials = () => {
+    if (sessionType === 'blurt') return
+    setScopeItems([])
+  }
 
   const toggleScopeItem = (item: ScopeItem) => {
+    const checked = scopeItems.some(s => s.scopeId === item.scopeId)
+    if (sessionType === 'blurt' && item.scopeType === 'folder' && !checked) return
     setScopeItems(prev => {
       const exists = prev.some(s => s.scopeId === item.scopeId)
       return exists ? prev.filter(s => s.scopeId !== item.scopeId) : [...prev, item]
@@ -109,31 +114,52 @@ export default function NewReminderScreen() {
 
   const isScopeChecked = (scopeId: string) => scopeItems.some(s => s.scopeId === scopeId)
 
-  const renderTopic = (topic: TopicItem) => (
-    <View key={topic.id}>
-      <ScopeRow
-        icon={<View style={styles.dot} />}
-        label={topic.title}
-        checked={isScopeChecked(topic.id)}
-        onPress={() => toggleScopeItem({ scopeType: 'topic', scopeId: topic.id, title: topic.title })}
-      />
-      {topic.subtopics.map(sub => (
+  const renderTopic = (topic: TopicItem) => {
+    // Blurt reads a topic's own notes plus its subtopics' notes; a topic with
+    // neither has no material to blurt from, same as an empty subtopic.
+    const topicHasMaterial = topic.notes.length > 0 || topic.subtopics.some(sub => sub.notes.length > 0)
+
+    return (
+      <View key={topic.id}>
         <ScopeRow
-          key={sub.id}
-          icon={<Ionicons name="return-down-forward" size={14} color={Colors.textMuted} />}
-          label={sub.title}
-          indent={24}
-          checked={isScopeChecked(sub.id)}
-          onPress={() => toggleScopeItem({ scopeType: 'subtopic', scopeId: sub.id, title: sub.title })}
+          icon={<View style={styles.dot} />}
+          label={topic.title}
+          checked={isScopeChecked(topic.id)}
+          onPress={() => {
+            if (sessionType === 'blurt' && !topicHasMaterial) return
+            toggleScopeItem({ scopeType: 'topic', scopeId: topic.id, title: topic.title })
+          }}
+          disabled={sessionType === 'blurt' && !topicHasMaterial}
         />
-      ))}
-    </View>
-  )
+        {topic.subtopics.map(sub => {
+          const subHasMaterial = sub.notes.length > 0
+          return (
+            <ScopeRow
+              key={sub.id}
+              icon={<Ionicons name="return-down-forward" size={14} color={Colors.textMuted} />}
+              label={sub.title}
+              indent={24}
+              checked={isScopeChecked(sub.id)}
+              onPress={() => {
+                if (sessionType === 'blurt' && !subHasMaterial) return
+                toggleScopeItem({ scopeType: 'subtopic', scopeId: sub.id, title: sub.title })
+              }}
+              disabled={sessionType === 'blurt' && !subHasMaterial}
+            />
+          )
+        })}
+      </View>
+    )
+  }
 
   const handleSave = async () => {
     if (!user || !courseId) return
     if (!label.trim()) { Alert.alert('Required', 'Please enter a label.'); return }
     if (days.size === 0) { Alert.alert('Required', 'Select at least one day.'); return }
+    if (sessionType === 'blurt' && (scopeItems.length === 0 || scopeItems.some(s => s.scopeType === 'folder'))) {
+      Alert.alert('Select a topic', 'Blurt needs a specific topic or subtopic — pick one below.')
+      return
+    }
 
     setSaving(true)
     try {
@@ -197,18 +223,60 @@ export default function NewReminderScreen() {
             placeholderTextColor={Colors.textMuted}
           />
 
+          <Text style={styles.fieldLabel}>Study mode</Text>
+          <View style={styles.modeRow}>
+            <TouchableOpacity
+              style={[styles.modeBtn, sessionType === 'quiz' && styles.modeBtnActive]}
+              onPress={() => setSessionType('quiz')}
+            >
+              <Ionicons name="checkbox-outline" size={16} color={sessionType === 'quiz' ? '#fff' : Colors.textSecondary} />
+              <Text style={[styles.modeBtnText, sessionType === 'quiz' && styles.modeBtnTextActive]}>Quiz</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modeBtn, sessionType === 'blurt' && styles.modeBtnActive]}
+              onPress={() => setSessionType('blurt')}
+            >
+              <Ionicons name="pencil-outline" size={16} color={sessionType === 'blurt' ? '#fff' : Colors.textSecondary} />
+              <Text style={[styles.modeBtnText, sessionType === 'blurt' && styles.modeBtnTextActive]}>Blurt</Text>
+            </TouchableOpacity>
+          </View>
+
+          {sessionType === 'quiz' && (
+            <>
+              <Text style={styles.fieldLabel}>Questions</Text>
+              <View style={styles.stepperRow}>
+                <Text style={styles.stepperHint}>How many to answer</Text>
+                <View style={styles.stepper}>
+                  <TouchableOpacity style={styles.stepperBtn} onPress={() => setQuestionCount(c => Math.max(1, c - 1))}>
+                    <Ionicons name="remove" size={16} color={Colors.textPrimary} />
+                  </TouchableOpacity>
+                  <Text style={styles.stepperValue}>{questionCount}</Text>
+                  <TouchableOpacity style={styles.stepperBtn} onPress={() => setQuestionCount(c => Math.min(30, c + 1))}>
+                    <Ionicons name="add" size={16} color={Colors.textPrimary} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </>
+          )}
+
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.fieldLabel}>Study from</Text>
             <Text style={styles.sectionSummary}>
               {scopeItems.length === 0 ? 'All materials' : `${scopeItems.length} selected`}
             </Text>
           </View>
+          {sessionType === 'blurt' && (
+            <Text style={styles.scopeHint}>
+              Blurt needs a specific topic or subtopic, whole-course and folder selections aren't supported yet.
+            </Text>
+          )}
           <View style={styles.scopeList}>
             <ScopeRow
               icon={<Ionicons name="layers-outline" size={16} color={Colors.primary} />}
               label="All materials"
               checked={scopeItems.length === 0}
               onPress={toggleAllMaterials}
+              disabled={sessionType === 'blurt'}
             />
           {course.folders.map(folder => (
           <View key={folder.id}>
@@ -217,6 +285,7 @@ export default function NewReminderScreen() {
               label={folder.title}
               checked={isScopeChecked(folder.id)}
               onPress={() => toggleScopeItem({ scopeType: 'folder', scopeId: folder.id, title: folder.title })}
+              disabled={sessionType === 'blurt' && !isScopeChecked(folder.id)}
             />
             {folder.topics.map(renderTopic)}
           </View>
@@ -274,42 +343,6 @@ export default function NewReminderScreen() {
               </View>
             )}
 
-          <Text style={styles.fieldLabel}>Study mode</Text>
-          <View style={styles.modeRow}>
-            <TouchableOpacity
-              style={[styles.modeBtn, sessionType === 'quiz' && styles.modeBtnActive]}
-              onPress={() => setSessionType('quiz')}
-            >
-              <Ionicons name="checkbox-outline" size={16} color={sessionType === 'quiz' ? '#fff' : Colors.textSecondary} />
-              <Text style={[styles.modeBtnText, sessionType === 'quiz' && styles.modeBtnTextActive]}>Quiz</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modeBtn, sessionType === 'blurt' && styles.modeBtnActive]}
-              onPress={() => setSessionType('blurt')}
-            >
-              <Ionicons name="pencil-outline" size={16} color={sessionType === 'blurt' ? '#fff' : Colors.textSecondary} />
-              <Text style={[styles.modeBtnText, sessionType === 'blurt' && styles.modeBtnTextActive]}>Blurt</Text>
-            </TouchableOpacity>
-          </View>
-
-          {sessionType === 'quiz' && (
-            <>
-              <Text style={styles.fieldLabel}>Questions</Text>
-              <View style={styles.stepperRow}>
-                <Text style={styles.stepperHint}>How many to answer</Text>
-                <View style={styles.stepper}>
-                  <TouchableOpacity style={styles.stepperBtn} onPress={() => setQuestionCount(c => Math.max(1, c - 1))}>
-                    <Ionicons name="remove" size={16} color={Colors.textPrimary} />
-                  </TouchableOpacity>
-                  <Text style={styles.stepperValue}>{questionCount}</Text>
-                  <TouchableOpacity style={styles.stepperBtn} onPress={() => setQuestionCount(c => Math.min(30, c + 1))}>
-                    <Ionicons name="add" size={16} color={Colors.textPrimary} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </>
-          )}
-
           {isEditing && (
             <TouchableOpacity style={styles.deleteRow} onPress={handleDelete}>
               <Ionicons name="trash-outline" size={16} color={Colors.error} />
@@ -340,12 +373,14 @@ const styles = StyleSheet.create({
   sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   fieldLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textPrimary, marginTop: Spacing.lg, marginBottom: Spacing.xs },
   sectionSummary: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: Spacing.lg },
+  scopeHint: { fontSize: Typography.xs, color: Colors.warning, marginBottom: Spacing.xs },
   scopeList: { ...CardBase, overflow: 'hidden', padding: 0 },
   scopeRow: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
     paddingVertical: Spacing.md, paddingRight: Spacing.md,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
+  scopeRowDisabled: { opacity: 0.4 },
   folderHeaderRow: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
     paddingVertical: Spacing.md, paddingLeft: Spacing.md,

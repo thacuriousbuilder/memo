@@ -51,7 +51,20 @@ function getDaysColor(daysLeft: number): string {
 // ─────────────────────────────────────────
 async function startPlanItem(item: PlanItem) {
   if (item.sessionType === 'blurt') {
-   router.replace('/blurt/[id]')
+    const scope = item.scopeItems[0]
+    if (!scope || scope.scopeType === 'folder') {
+      Alert.alert('No materials', 'This reminder isn\'t scoped to a specific topic yet.')
+      return
+    }
+    router.replace({
+      pathname: '/blurt/[id]',
+      params: {
+        id: item.courseId,
+        scopeType: scope.scopeType,
+        scopeId: scope.scopeId,
+        title: item.label,
+      },
+    })
     return
   }
   try {
