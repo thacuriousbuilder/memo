@@ -15,6 +15,7 @@ import { useExams, createExam, deleteExam } from '@/hooks/useExams'
 import StudyMaterialsList from '@/components/studyMaterialsList'
 import { useReminders, toggleReminder, formatDaysOfWeek, formatTime } from '@/hooks/useReminders'
 import { Switch } from 'react-native'
+import { parseLocalDate } from '@/hooks/useExams'
 
 // ─────────────────────────────────────────
 // GRADE BADGE
@@ -202,7 +203,7 @@ export default function CourseDetailScreen() {
                     <View style={styles.examInfo}>
                       <Text style={styles.examTitle}>{exam.title}</Text>
                       <Text style={styles.examDate}>
-                        {new Date(exam.exam_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
+                        {parseLocalDate(exam.exam_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
                       </Text>
                     </View>
                    <Text style={[styles.examDays, { color }]}>
@@ -244,7 +245,7 @@ export default function CourseDetailScreen() {
                   <View style={styles.examInfo}>
                     <Text style={styles.examTitle}>{exam.title}</Text>
                     <Text style={styles.examDate}>
-                      {new Date(exam.exam_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
+                      {parseLocalDate(exam.exam_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
                     </Text>
                   </View>
                   <Text style={[styles.examDays, { color: Colors.textMuted }]}>

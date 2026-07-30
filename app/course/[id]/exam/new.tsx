@@ -11,7 +11,7 @@ import {
   import { Colors, Spacing, Radius, Typography } from '@/constants/theme'
   import { useSession } from '@/hooks/useSession'
   import { useCourseOverview } from '@/hooks/useCourseOverview'
-  import { createExam } from '@/hooks/useExams'
+  import { createExam, parseLocalDate } from '@/hooks/useExams'
   import StudyMaterialsList from '@/components/studyMaterialsList'
   import { useEffect } from 'react'
   import { getExam, updateExam, deleteExam } from '@/hooks/useExams'
@@ -49,19 +49,18 @@ import {
     const [saving,      setSaving]      = useState(false)
     const isEditing = !!examId
     const [prefilling, setPrefilling] = useState(isEditing)
-
+      
     useEffect(() => {
-        if (!examId) return
-        getExam(examId).then(exam => {
-          if (!exam) return
-          setExamType(exam.exam_type)
-          setTitle(exam.title)
-          const datePart = exam.exam_date.split('T')[0]
-          setDate(new Date(datePart + 'T00:00:00'))
-          setSelectedIds(new Set(exam.material_note_ids ?? []))
-          setPrefilling(false)
-        }).catch(() => setPrefilling(false))
-      }, [examId])
+      if (!examId) return
+      getExam(examId).then(exam => {
+        if (!exam) return
+        setExamType(exam.exam_type)
+        setTitle(exam.title)
+        setDate(parseLocalDate(exam.exam_date))
+        setSelectedIds(new Set(exam.material_note_ids ?? []))
+        setPrefilling(false)
+      }).catch(() => setPrefilling(false))
+    }, [examId])
   
     const handleToggle = (ids: string[]) => {
       setSelectedIds(prev => {

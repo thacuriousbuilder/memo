@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react'
 import { useFocusEffect }        from 'expo-router'
 import { supabase }              from '@/lib/supabase'
 import { formatTime, ScopeItem, SessionType } from '@/hooks/useReminders'
+import { parseLocalDate } from '@/hooks/useExams'
 
 // ─────────────────────────────────────────
 // TYPES
@@ -86,12 +87,13 @@ function getRelativeTime(dateStr: string): string {
 }
 
 function getDaysLeft(dateStr: string): number {
-  const exam = new Date(dateStr)
+  const exam = parseLocalDate(dateStr)
   const now  = new Date()
   exam.setHours(0, 0, 0, 0)
   now.setHours(0, 0, 0, 0)
   return Math.ceil((exam.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
 }
+
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number)

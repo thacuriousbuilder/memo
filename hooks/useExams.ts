@@ -22,10 +22,19 @@ export interface Exam {
 }
 
 // ─────────────────────────────────────────
-// HELPERS
+// SAFE LOCAL DATE PARSING
+// Bare "YYYY-MM-DD" strings are parsed as UTC by `new Date()`,
+// which shifts the displayed date back a day in negative-UTC
+// timezones. Parse the components manually instead.
 // ─────────────────────────────────────────
+export function parseLocalDate(dateStr: string): Date {
+  const [year, month, day] = dateStr.split('T')[0].split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+// ── Update getDaysLeft to use it ──
 function getDaysLeft(dateStr: string): number {
-  const exam = new Date(dateStr)
+  const exam = parseLocalDate(dateStr)
   const now  = new Date()
   exam.setHours(0, 0, 0, 0)
   now.setHours(0, 0, 0, 0)
@@ -34,8 +43,9 @@ function getDaysLeft(dateStr: string): number {
   )
 }
 
+// ── Update formatDate to use it ──
 function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-US', {
+  return parseLocalDate(dateStr).toLocaleDateString('en-US', {
     month: 'long',
     day:   'numeric',
     year:  'numeric',
