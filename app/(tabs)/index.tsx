@@ -51,7 +51,7 @@ function getDaysColor(daysLeft: number): string {
 // ─────────────────────────────────────────
 async function startPlanItem(item: PlanItem) {
   if (item.sessionType === 'blurt') {
-    Alert.alert('Coming soon', 'Blurt sessions aren\'t available yet.')
+   router.replace('/blurt/[id]')
     return
   }
   try {

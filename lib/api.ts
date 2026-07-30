@@ -157,6 +157,49 @@ export const QuizAPI = {
 }
 
 // ─────────────────────────────────────────
+// BLURT
+// ─────────────────────────────────────────
+export const BlurtAPI = {
+  grade: (params: {
+    user_id:      string
+    scope_type:   'topic' | 'subtopic'
+    scope_id:     string
+    answer_text:  string
+    input_method: 'text' | 'voice'
+  }) => request<{
+    attempt_id: string
+    rating: 'strong' | 'partial' | 'weak'
+    feedback: string
+    review_pointers: string[]
+  }>('/blurt/grade', { method: 'POST', body: JSON.stringify(params) }),
+  
+  getPrompts: (params: {
+    scope_type: 'topic' | 'subtopic'
+    scope_id:   string
+    count:      number
+  }) => request<{
+    prompts: { id: string; prompt_text: string; topic: string }[]
+  }>('/blurt/prompts', { method: 'POST', body: JSON.stringify(params) }),
+
+  transcribe: async (audioUri: string): Promise<{ text: string }> => {
+    const formData = new FormData()
+    formData.append('audio', {
+      uri:  audioUri,
+      name: 'recording.m4a',
+      type: 'audio/m4a',
+    } as any)
+
+    const res = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/blurt/transcribe`, {
+      method: 'POST',
+      body:   formData,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    if (!res.ok) throw new Error('Transcription failed')
+    return res.json()
+  },
+}
+
+// ─────────────────────────────────────────
 // NOTIFICATIONS
 // ─────────────────────────────────────────
 export const NotificationsAPI = {

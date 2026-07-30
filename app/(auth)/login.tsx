@@ -39,7 +39,6 @@ import {
         await signInWithApple()
         router.replace('/(tabs)')
       } catch (error: any) {
-        console.log('[Apple] sign-in error:', error.message, JSON.stringify(error, null, 2))
         if (error.code !== 'ERR_REQUEST_CANCELED') {
           Alert.alert('Error', 'Something went wrong while connecting to your Apple account. Please try again or choose a different sign-in method.')
         }
