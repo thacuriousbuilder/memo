@@ -1,5 +1,6 @@
 
 
+import { useState } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, ActivityIndicator, Alert
@@ -8,7 +9,14 @@ import { router } from 'expo-router'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
 import { useSession } from '@/hooks/useSession'
-import { useStudyOverview, Recommendation, RecentAttempt } from '@/hooks/useStudyOverview'
+import { useStudyOverview, Recommendation, RecentAttempt, fetchBlurtSessionDetail, pickRandomBlurtScope } from '@/hooks/useStudyOverview'
+import { fetchQuizAttemptDetail } from '@/hooks/useQuiz'
+
+const BLURT_RATING_META = {
+  strong:  { label: 'Strong',  color: Colors.success },
+  partial: { label: 'Partial', color: Colors.warning },
+  weak:    { label: 'Weak',    color: Colors.error },
+}
 
 // ─────────────────────────────────────────
 // RECOMMENDATION ROW
@@ -33,12 +41,12 @@ function RecommendationRow({ rec, onPress }: { rec: Recommendation; onPress: () 
 // PRACTICE ROW
 // ─────────────────────────────────────────
 function PracticeRow({
-  icon, title, subtitle, onPress, disabled,
+  icon, title, subtitle, onPress, disabled, loading,
 }: {
-  icon: string; title: string; subtitle: string; onPress: () => void; disabled?: boolean
+  icon: string; title: string; subtitle: string; onPress: () => void; disabled?: boolean; loading?: boolean
 }) {
   return (
-    <TouchableOpacity style={[styles.row, disabled && { opacity: 0.5 }]} onPress={onPress} activeOpacity={0.7} disabled={disabled}>
+    <TouchableOpacity style={[styles.row, disabled && { opacity: 0.5 }]} onPress={onPress} activeOpacity={0.7} disabled={disabled || loading}>
       <View style={styles.practiceIconBadge}>
         <Ionicons name={icon as any} size={20} color={Colors.primary} />
       </View>
@@ -46,7 +54,9 @@ function PracticeRow({
         <Text style={styles.rowTitle} numberOfLines={1}>{title}</Text>
         <Text style={styles.rowSub} numberOfLines={1}>{subtitle}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+      {loading
+        ? <ActivityIndicator size="small" color={Colors.primary} />
+        : <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />}
     </TouchableOpacity>
   )
 }
@@ -54,20 +64,33 @@ function PracticeRow({
 // ─────────────────────────────────────────
 // RECENT ROW
 // ─────────────────────────────────────────
-function RecentRow({ attempt, onPress }: { attempt: any; onPress: () => void }) {
-  const color = attempt.scorePct >= 80 ? Colors.success : attempt.scorePct >= 60 ? Colors.warning : Colors.error
+function RecentRow({ attempt, onPress, resolving }: { attempt: RecentAttempt; onPress: () => void; resolving: boolean }) {
+  const isBlurt = attempt.kind === 'blurt'
+  const badge = isBlurt
+    ? BLURT_RATING_META[attempt.rating]
+    : { label: `${attempt.scorePct}%`, color: attempt.scorePct >= 80 ? Colors.success : attempt.scorePct >= 60 ? Colors.warning : Colors.error }
+  const metaText = isBlurt
+    ? `${attempt.promptCount} ${attempt.promptCount === 1 ? 'prompt' : 'prompts'} · ${attempt.date}`
+    : `${attempt.questionCount} questions · ${attempt.date}`
+
   return (
-    <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={onPress}>
+    <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={onPress} disabled={resolving}>
       <View style={[styles.iconBadge, { backgroundColor: (attempt.courseColor ?? Colors.primary) + '22' }]}>
         <MaterialCommunityIcons name={attempt.courseIcon as any} size={20} color={attempt.courseColor ?? Colors.primary} />
       </View>
       <View style={styles.rowInfo}>
         <Text style={styles.rowTitle} numberOfLines={1}>{attempt.courseTitle}</Text>
         <Text style={styles.rowSub} numberOfLines={1}>{attempt.scopeLabel}</Text>
-        <Text style={styles.rowMeta}>{attempt.questionCount} questions · {attempt.date}</Text>
+        <Text style={styles.rowMeta}>{metaText}</Text>
       </View>
-      <Text style={[styles.scoreText, { color }]}>{attempt.scorePct}%</Text>
-      <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+      {resolving ? (
+        <ActivityIndicator size="small" color={Colors.primary} />
+      ) : (
+        <>
+          <Text style={[styles.scoreText, { color: badge.color }]}>{badge.label}</Text>
+          <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+        </>
+      )}
     </TouchableOpacity>
   )
 }
@@ -86,6 +109,8 @@ function QuickQuizCountRow({ count, onPress }: { count: number; onPress: () => v
 export default function StudyScreen() {
   const { user } = useSession()
   const { recommendations, recentAttempts, loading } = useStudyOverview(user?.id ?? null)
+  const [resolvingId, setResolvingId] = useState<string | null>(null)
+  const [startingQuickBlurt, setStartingQuickBlurt] = useState(false)
 
   const handleRecommendationTap = (rec: Recommendation) => {
     if (!rec.noteIds.length) {
@@ -109,16 +134,72 @@ export default function StudyScreen() {
       params: { id: 'all', mode: 'quick', title: 'Quick Quiz', presetCount: String(count) },
     })
   }
-    
-  const handleRetake = (attempt: RecentAttempt) => {
-    router.push({
-      pathname: '/study/[id]',
-      params: {
-        id: attempt.targetId,
-        mode: attempt.mode,
-        title: attempt.scopeLabel,
-      },
-    })
+
+  const startQuickBlurt = async () => {
+    if (!user || startingQuickBlurt) return
+    setStartingQuickBlurt(true)
+    try {
+      const scope = await pickRandomBlurtScope(user.id)
+      if (!scope) {
+        Alert.alert('No materials yet', 'Add some notes to a course first — Quick Blurt picks a random topic to free-recall.')
+        return
+      }
+      router.push({
+        pathname: '/blurt/[id]',
+        params: {
+          id:        scope.scopeId,
+          scopeType: scope.scopeType,
+          scopeId:   scope.scopeId,
+          title:     scope.title,
+        },
+      })
+    } catch (err: any) {
+      Alert.alert('Error', err.message ?? 'Could not start Quick Blurt.')
+    } finally {
+      setStartingQuickBlurt(false)
+    }
+  }
+
+
+  const handleViewResult = async (attempt: RecentAttempt) => {
+    if (resolvingId) return
+    setResolvingId(attempt.id)
+    try {
+      if (attempt.kind === 'blurt') {
+        const results = await fetchBlurtSessionDetail(attempt.ids)
+        router.push({
+          pathname: '/blurt/results',
+          params: {
+            title:     attempt.scopeLabel,
+            results:   JSON.stringify(results),
+            scopeType: attempt.scopeType,
+            scopeId:   attempt.scopeId,
+          },
+        })
+        return
+      }
+
+      const { correct, total, answers } = await fetchQuizAttemptDetail(attempt.id)
+      const passed = total > 0 && correct / total >= 0.8
+      router.push({
+        pathname: '/results',
+        params: {
+          correct: String(correct),
+          total:   String(total),
+          needed:  String(Math.ceil(total * 0.8)),
+          title:   attempt.scopeLabel,
+          passed:  passed ? '1' : '0',
+          mode:    attempt.mode,
+          scopeId: attempt.targetId,
+          answers: JSON.stringify(answers),
+          source:  'recent',
+        },
+      })
+    } catch (err: any) {
+      Alert.alert('Error', err.message ?? 'Could not load results.')
+    } finally {
+      setResolvingId(null)
+    }
   }
 
   if (loading) return (
@@ -176,9 +257,9 @@ export default function StudyScreen() {
             <PracticeRow
               icon="refresh"
               title="Quick Blurt"
-              subtitle="Coming soon — free-recall a topic from memory"
-              disabled
-              onPress={() => {}}
+              subtitle="Free-recall a random topic from memory"
+              onPress={startQuickBlurt}
+              loading={startingQuickBlurt}
             />
             <PracticeRow
           icon="refresh-circle-outline"
@@ -202,7 +283,7 @@ export default function StudyScreen() {
             <View style={styles.list}>
              {recentAttempts.map((a, idx) => (
             <View key={a.id}>
-              <RecentRow attempt={a} onPress={() => handleRetake(a)} />
+              <RecentRow attempt={a} onPress={() => handleViewResult(a)} resolving={resolvingId === a.id} />
               {idx < recentAttempts.length - 1 && <View style={styles.divider} />}
             </View>
           ))}

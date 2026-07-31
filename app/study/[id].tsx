@@ -529,7 +529,7 @@ export default function StudySessionScreen() {
     if (!user) return
     try {
       setSaving(true)
-      const { attemptId, passed } = await saveQuizAttempt({
+      const { passed } = await saveQuizAttempt({
         userId:        user.id,
         mode,
         id,
@@ -546,7 +546,8 @@ export default function StudySessionScreen() {
           needed:    Math.ceil(total * 0.8),
           title,
           passed:    passed ? '1' : '0',
-          attemptId,
+          mode,
+          scopeId:   id,
           answers:   JSON.stringify(answers),
         },
       })

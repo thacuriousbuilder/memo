@@ -384,6 +384,48 @@ const courseId = params.mode === 'quick' && params.id === 'all'
 }
 
 // ─────────────────────────────────────────
+// FETCH A PAST ATTEMPT'S FULL BREAKDOWN
+// attempt_answers only stores selection/correctness — question text,
+// the correct option, and the explanation are joined live from the
+// current questions/answer_options tables.
+// ─────────────────────────────────────────
+export async function fetchQuizAttemptDetail(attemptId: string): Promise<{
+  correct: number
+  total:   number
+  answers: AttemptAnswer[]
+}> {
+  const { data, error } = await supabase
+    .from('attempt_answers')
+    .select(`
+      question_id, selected_option_index, is_correct,
+      questions ( question_text, correct_option_index, explanation, answer_options ( option_index, option_text ) )
+    `)
+    .eq('attempt_id', attemptId)
+
+  if (error) throw error
+
+  const answers: AttemptAnswer[] = (data ?? []).map((row: any) => {
+    const q = row.questions
+    const correctOption = (q?.answer_options ?? []).find((o: any) => o.option_index === q?.correct_option_index)
+    return {
+      questionId:    row.question_id,
+      selectedIndex: row.selected_option_index,
+      isCorrect:     row.is_correct,
+      correctIndex:  q?.correct_option_index ?? 0,
+      questionText:  q?.question_text ?? '',
+      correctText:   correctOption?.option_text ?? '',
+      explanation:   q?.explanation ?? null,
+    }
+  })
+
+  return {
+    correct: answers.filter(a => a.isCorrect).length,
+    total:   answers.length,
+    answers,
+  }
+}
+
+// ─────────────────────────────────────────
 // SHUFFLE
 // ─────────────────────────────────────────
 function shuffle<T>(arr: T[]): T[] {

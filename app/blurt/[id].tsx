@@ -9,6 +9,7 @@ import {
   import { Ionicons } from '@expo/vector-icons'
   import {
     useAudioRecorder, useAudioRecorderState, AudioModule, RecordingPresets,
+    setAudioModeAsync,
   } from 'expo-audio'
   import { Colors, Spacing, Radius, Typography } from '@/constants/theme'
   import { useSession } from '@/hooks/useSession'
@@ -39,9 +40,9 @@ import {
   }
   
   const RATING_META = {
-    strong:  { label: 'Strong understanding',  color: Colors.success },
-    partial: { label: 'Partial understanding', color: Colors.warning },
-    weak:    { label: 'Needs more review',     color: Colors.error },
+    strong:  { label: 'Strong understanding',  color: Colors.success, muted: Colors.successMuted },
+    partial: { label: 'Partial understanding', color: Colors.warning, muted: Colors.warningMuted },
+    weak:    { label: 'Needs more review',     color: Colors.error,   muted: Colors.errorMuted },
   }
   
   // ─────────────────────────────────────────
@@ -128,11 +129,21 @@ import {
     const [grading, setGrading] = useState(false)
     const [result, setResult] = useState<GradeResult | null>(null)
     const [allResults, setAllResults] = useState<GradeResult[]>([])
+    const [showAnswer, setShowAnswer] = useState(false)
   
     const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY)
     const recorderState  = useAudioRecorderState(audioRecorder)
   
-    useEffect(() => { AudioModule.requestRecordingPermissionsAsync() }, [])
+    useEffect(() => {
+      (async () => {
+        const { granted } = await AudioModule.requestRecordingPermissionsAsync()
+        if (!granted) {
+          Alert.alert('Microphone Access Needed', 'Enable microphone access in Settings to record.')
+          return
+        }
+        await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true })
+      })()
+    }, [])
   
     const current = prompts[index]
     const isLast  = index === prompts.length - 1
@@ -203,9 +214,11 @@ import {
       setResult(null)
       setInputMode('text')
       setRecordingPhase('idle')
+      setShowAnswer(false)
     }
-  
+
     const canSubmit = !grading && recordingPhase !== 'recording' && recordingPhase !== 'transcribing' && !result
+    const progressPct = ((index + (result ? 1 : 0)) / prompts.length) * 100
   
     return (
       <View style={styles.root}>
@@ -216,10 +229,15 @@ import {
           <Text style={styles.headerTitle}>Blurt</Text>
           <View style={{ width: 24 }} />
         </View>
-  
-        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-          <Text style={styles.progressLabel}>Prompt {index + 1} of {prompts.length}</Text>
-  
+
+        <View style={styles.progressRow}>
+          <View style={styles.progressBarTrack}>
+            <View style={[styles.progressBarFill, { width: `${progressPct}%` }]} />
+          </View>
+          <Text style={styles.progressCount}>{index + 1} of {prompts.length}</Text>
+        </View>
+
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <View style={styles.promptCard}>
             <Text style={styles.promptText}>{current.prompt_text}</Text>
           </View>
@@ -258,7 +276,7 @@ import {
           {!result && inputMode === 'voice' && recordingPhase === 'idle' && (
             <View style={styles.voiceStage}>
               <TouchableOpacity style={styles.recordBtn} onPress={startRecording} activeOpacity={0.8}>
-                <Ionicons name="mic" size={32} color="#fff" />
+                <Ionicons name="mic" size={36} color={Colors.primary} />
               </TouchableOpacity>
               <Text style={styles.voiceHint}>Tap to start recording</Text>
             </View>
@@ -283,10 +301,10 @@ import {
           )}
   
           {!result && inputMode === 'voice' && recordingPhase === 'reviewing' && (
-            <View style={{ gap: Spacing.sm }}>
+            <View style={{ flex: 1, gap: Spacing.sm }}>
               <Text style={styles.reviewLabel}>Review and edit if needed:</Text>
               <TextInput
-                style={[styles.textArea, { minHeight: 120 }]}
+                style={styles.textArea}
                 multiline
                 value={answerText}
                 onChangeText={setAnswerText}
@@ -300,20 +318,34 @@ import {
           )}
   
           {result && (
-            <View style={[styles.resultCard, { borderColor: RATING_META[result.rating].color }]}>
-              <Text style={[styles.resultRating, { color: RATING_META[result.rating].color }]}>
-                {RATING_META[result.rating].label}
-              </Text>
-              <Text style={styles.resultFeedback}>{result.feedback}</Text>
+            <View style={{ gap: Spacing.md }}>
+              <View style={[styles.resultCard, { backgroundColor: RATING_META[result.rating].muted }]}>
+                <View style={styles.resultBadge}>
+                  <Ionicons name="refresh" size={14} color={RATING_META[result.rating].color} />
+                  <Text style={[styles.resultBadgeText, { color: RATING_META[result.rating].color }]}>
+                    {RATING_META[result.rating].label}
+                  </Text>
+                </View>
+                <Text style={styles.resultFeedback}>{result.feedback}</Text>
+              </View>
+
               {result.review_pointers.length > 0 && (
-                <View style={styles.pointersRow}>
+                <View style={{ gap: Spacing.sm }}>
+                  <Text style={styles.pointersLabel}>KEY POINTS TO REVIEW</Text>
                   {result.review_pointers.map((p, i) => (
-                    <View key={i} style={styles.pointerChip}>
-                      <Text style={styles.pointerChipText}>{p}</Text>
+                    <View key={i} style={styles.pointerRow}>
+                      <Ionicons name="alert-circle-outline" size={16} color={Colors.warning} />
+                      <Text style={styles.pointerRowText} numberOfLines={1}>{p}</Text>
                     </View>
                   ))}
                 </View>
               )}
+
+              <TouchableOpacity style={styles.answerToggle} onPress={() => setShowAnswer(v => !v)} activeOpacity={0.7}>
+                <Text style={styles.answerToggleText}>Your answer</Text>
+                <Ionicons name={showAnswer ? 'chevron-down' : 'chevron-forward'} size={16} color={Colors.textMuted} />
+              </TouchableOpacity>
+              {showAnswer && <Text style={styles.answerText}>{answerText}</Text>}
             </View>
           )}
   
@@ -330,6 +362,7 @@ import {
           ) : (
             <TouchableOpacity style={styles.submitBtn} onPress={handleNext}>
               <Text style={styles.submitBtnText}>{isLast ? 'Finish' : 'Next prompt'}</Text>
+              <Ionicons name="chevron-forward" size={18} color="#fff" />
             </TouchableOpacity>
           )}
         </ScrollView>
@@ -398,6 +431,8 @@ import {
             params: {
               title: params.title,
               results: JSON.stringify(results),
+              scopeType: params.scopeType,
+              scopeId: params.scopeId,
             },
           })
         }}
@@ -458,29 +493,39 @@ import {
       paddingHorizontal: Spacing.base, paddingTop: Spacing.xl + 32, paddingBottom: Spacing.md,
     },
     headerTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
-    container: { paddingHorizontal: Spacing.base, paddingBottom: Spacing.xxxl, gap: Spacing.md },
-    progressLabel: { fontSize: Typography.xs, color: Colors.textMuted },
+    progressRow: {
+      flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+      paddingHorizontal: Spacing.base, paddingBottom: Spacing.md,
+    },
+    progressBarTrack: {
+      flex: 1, height: 4, borderRadius: Radius.full,
+      backgroundColor: Colors.progressTrack, overflow: 'hidden',
+    },
+    progressBarFill: { height: 4, borderRadius: Radius.full, backgroundColor: Colors.progressFill },
+    progressCount: { fontSize: Typography.xs, color: Colors.textMuted },
+    container: { flexGrow: 1, paddingHorizontal: Spacing.base, paddingBottom: Spacing.xxxl, gap: Spacing.md },
     promptCard: { backgroundColor: Colors.primaryMuted, borderRadius: Radius.lg, padding: Spacing.md },
     promptText: { fontSize: Typography.base, color: Colors.primary, lineHeight: Typography.base * 1.4 },
-    modeToggle: { flexDirection: 'row', gap: Spacing.sm },
+    modeToggle: {
+      flexDirection: 'row', gap: 4, backgroundColor: Colors.cardElevated,
+      borderRadius: Radius.full, padding: 4,
+    },
     modeBtn: {
       flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs,
-      paddingVertical: Spacing.sm, borderRadius: Radius.full, backgroundColor: Colors.card,
-      borderWidth: 1, borderColor: Colors.border,
+      paddingVertical: Spacing.sm, borderRadius: Radius.full,
     },
-    modeBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+    modeBtnActive: { backgroundColor: Colors.primary },
     modeBtnText: { fontSize: Typography.sm, color: Colors.textSecondary, fontWeight: Typography.medium },
     modeBtnTextActive: { color: '#fff' },
     textArea: {
-      backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border,
+      flex: 1, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.primaryBorder,
       borderRadius: Radius.lg, padding: Spacing.md, fontSize: Typography.base, color: Colors.textPrimary,
       minHeight: 140,
     },
     voiceStage: {
-      minHeight: 160, alignItems: 'center', justifyContent: 'center', gap: Spacing.md,
-      borderWidth: 1, borderColor: Colors.border, borderStyle: 'dashed', borderRadius: Radius.lg,
+      flex: 1, minHeight: 280, alignItems: 'center', justifyContent: 'center', gap: Spacing.md,
     },
-    recordBtn: { width: 64, height: 64, borderRadius: Radius.full, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
+    recordBtn: { width: 88, height: 88, borderRadius: Radius.full, backgroundColor: Colors.primaryMuted, alignItems: 'center', justifyContent: 'center' },
     recordingPulse: { width: 64, height: 64, borderRadius: Radius.full, backgroundColor: Colors.error, alignItems: 'center', justifyContent: 'center' },
     recordingTimer: { fontSize: Typography.lg, fontWeight: Typography.bold, color: Colors.textPrimary },
     voiceHint: { fontSize: Typography.sm, color: Colors.textMuted },
@@ -492,12 +537,35 @@ import {
     reviewLabel: { fontSize: Typography.sm, color: Colors.textSecondary },
     reRecordBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'center' },
     reRecordText: { fontSize: Typography.sm, color: Colors.textSecondary },
-    resultCard: { borderWidth: 1.5, borderRadius: Radius.lg, padding: Spacing.md, gap: Spacing.sm },
-    resultRating: { fontSize: Typography.base, fontWeight: Typography.bold },
+    resultCard: { borderRadius: Radius.lg, padding: Spacing.md, gap: Spacing.sm },
+    resultBadge: {
+      flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+      backgroundColor: Colors.card, borderRadius: Radius.full,
+      paddingVertical: 6, paddingHorizontal: Spacing.md,
+    },
+    resultBadgeText: { fontSize: Typography.xs, fontWeight: Typography.bold, letterSpacing: 0.5, textTransform: 'uppercase' },
     resultFeedback: { fontSize: Typography.sm, color: Colors.textPrimary, lineHeight: Typography.sm * 1.5 },
-    pointersRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs },
-    pointerChip: { backgroundColor: Colors.cardElevated, borderRadius: Radius.full, paddingVertical: 4, paddingHorizontal: Spacing.sm },
-    pointerChipText: { fontSize: Typography.xs, color: Colors.textSecondary },
-    submitBtn: { backgroundColor: Colors.primary, borderRadius: Radius.md, paddingVertical: Spacing.md, alignItems: 'center' },
+    pointersLabel: { fontSize: Typography.xs, fontWeight: Typography.bold, color: Colors.textSecondary, letterSpacing: 0.5, textTransform: 'uppercase' },
+    pointerRow: {
+      flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+      backgroundColor: Colors.warningMuted, borderRadius: Radius.full,
+      paddingVertical: Spacing.sm, paddingHorizontal: Spacing.md,
+    },
+    pointerRowText: { flex: 1, fontSize: Typography.sm, color: Colors.textPrimary },
+    answerToggle: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border,
+      borderRadius: Radius.lg, paddingVertical: Spacing.md, paddingHorizontal: Spacing.base,
+    },
+    answerToggleText: { fontSize: Typography.base, color: Colors.textSecondary, fontWeight: Typography.medium },
+    answerText: {
+      fontSize: Typography.sm, color: Colors.textPrimary, lineHeight: Typography.sm * 1.5,
+      backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border,
+      borderRadius: Radius.lg, padding: Spacing.base,
+    },
+    submitBtn: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs,
+      backgroundColor: Colors.primary, borderRadius: Radius.md, paddingVertical: Spacing.md,
+    },
     submitBtnText: { fontSize: Typography.base, fontWeight: Typography.semibold, color: '#fff' },
   })

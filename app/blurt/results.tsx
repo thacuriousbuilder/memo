@@ -27,8 +27,31 @@ function getOverallRating(results: GradeResult[]): 'strong' | 'partial' | 'weak'
 }
 
 export default function BlurtResultsScreen() {
-  const params = useLocalSearchParams<{ title: string; results: string }>()
+  const params = useLocalSearchParams<{
+    title:      string
+    results:    string
+    scopeType?: 'topic' | 'subtopic'
+    scopeId?:   string
+  }>()
   const results: GradeResult[] = JSON.parse(params.results ?? '[]')
+
+  const handleDone = () => {
+    router.dismissAll()
+    router.replace('/(tabs)/study')
+  }
+
+  const handleRetake = () => {
+    if (!params.scopeType || !params.scopeId) return
+    router.replace({
+      pathname: '/blurt/[id]',
+      params: {
+        id:        params.scopeId,
+        scopeType: params.scopeType,
+        scopeId:   params.scopeId,
+        title:     params.title,
+      },
+    })
+  }
 
   const overall = getOverallRating(results)
   const meta = RATING_META[overall]
@@ -93,7 +116,12 @@ export default function BlurtResultsScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.doneButton} onPress={() => router.replace('/(tabs)')} activeOpacity={0.8}>
+        {params.scopeType && params.scopeId && (
+          <TouchableOpacity style={styles.retakeButton} onPress={handleRetake} activeOpacity={0.8}>
+            <Text style={styles.retakeButtonText}>Retake</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={styles.doneButton} onPress={handleDone} activeOpacity={0.8}>
           <Text style={styles.doneButtonText}>Done</Text>
         </TouchableOpacity>
       </View>
@@ -126,9 +154,14 @@ const styles = StyleSheet.create({
   answerDot: { width: 8, height: 8, borderRadius: 4, marginTop: 5 },
   answerFeedback: { flex: 1, fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: Typography.sm * 1.4 },
   footer: {
-    paddingHorizontal: Spacing.base, paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.base, paddingVertical: Spacing.lg, gap: Spacing.sm,
     borderTopWidth: 1, borderTopColor: Colors.border, backgroundColor: Colors.background,
   },
   doneButton: { backgroundColor: Colors.primary, borderRadius: Radius.md, paddingVertical: Spacing.md, alignItems: 'center' },
   doneButtonText: { fontSize: Typography.base, fontWeight: Typography.semibold, color: '#fff' },
+  retakeButton: {
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.card,
+    borderRadius: Radius.md, paddingVertical: Spacing.md, alignItems: 'center',
+  },
+  retakeButtonText: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.primary },
 })

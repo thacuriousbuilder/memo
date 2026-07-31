@@ -158,14 +158,15 @@ function BreakdownCard({ answer }: { answer: AnswerItem }) {
 // ─────────────────────────────────────────
 export default function ResultsScreen() {
   const params = useLocalSearchParams<{
-    correct:   string
-    total:     string
-    needed:    string
-    title:     string
-    passed:    string
-    mode:      string
-    attemptId: string
-    answers:   string
+    correct:  string
+    total:    string
+    needed:   string
+    title:    string
+    passed:   string
+    mode:     string
+    scopeId:  string
+    answers:  string
+    source?:  string
   }>()
 
   const correct   = parseInt(params.correct  ?? '0')
@@ -189,11 +190,13 @@ export default function ResultsScreen() {
     ? 'You passed! Keep up the momentum.'
     : `You need ${params.needed} correct to pass. Try again!`
 
+  const isFromRecent = params.source === 'recent'
+
   const handleRetry = () => {
     router.replace({
       pathname: '/study/[id]',
       params: {
-        id:    params.attemptId ?? '',
+        id:    params.scopeId ?? '',
         mode,
         title,
       },
@@ -248,11 +251,11 @@ export default function ResultsScreen() {
       {/* Action Button */}
       <TouchableOpacity
         style={styles.actionButton}
-        onPress={passed ? handleDone : handleRetry}
+        onPress={isFromRecent ? handleRetry : (passed ? handleDone : handleRetry)}
         activeOpacity={0.8}
       >
         <Text style={styles.actionButtonText}>
-          {passed ? 'Done' : 'Retry Quiz'}
+          {isFromRecent ? 'Retake Quiz' : (passed ? 'Done' : 'Retry Quiz')}
         </Text>
       </TouchableOpacity>
     </ScrollView>
