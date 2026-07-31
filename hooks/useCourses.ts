@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase }  from '@/lib/supabase'
 import { Course, Section, Lesson, Exam, UpcomingExam } from '@/types'
 import { useFocusEffect } from 'expo-router'
+import { parseLocalDate } from '@/hooks/useExams'
 
 // ─────────────────────────────────────────
 // TYPES
@@ -79,6 +80,7 @@ export function useCourses(userId: string | null) {
         .order('exam_date', { ascending: true })
 
       const now = new Date()
+      now.setHours(0, 0, 0, 0)
 
       // Build enriched courses
       const enriched: CourseWithMeta[] = (coursesData ?? []).map(course => {
@@ -108,7 +110,8 @@ export function useCourses(userId: string | null) {
         const courseExams: UpcomingExam[] = (examsData ?? [])
           .filter((e: any) => e.course_id === course.id)
           .map((e: any) => {
-            const examDate = new Date(e.exam_date)
+            const examDate = parseLocalDate(e.exam_date)
+            examDate.setHours(0, 0, 0, 0)
             const daysUntil = Math.ceil(
               (examDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
             )
