@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Ionicons } from '@expo/vector-icons'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
 import {
-  CourseOverview, TopicItem, SubtopicItem, FolderItem, NoteRef,
+  CourseOverview, TopicItem, SubtopicItem, FolderItem, NoteRef, MasteryStats,
   deleteFolder, deleteTopic, deleteSubtopic,
 } from '@/hooks/useCourseOverview'
 
@@ -13,6 +13,14 @@ function topicNoteIds(topic: TopicItem): string[] {
 }
 function folderNoteIds(folder: FolderItem): string[] {
   return folder.topics.flatMap(topicNoteIds)
+}
+
+function MasteryStatus({ noteCount, item }: { noteCount: number; item: MasteryStats }) {
+  if (noteCount === 0) return null
+  if (item.questionCount === 0) return <Text style={styles.rowStatus}>Parsed</Text>
+  if (item.isMastered) return <Text style={styles.rowStatus}>✓ Mastered</Text>
+  if (item.masteredCount > 0) return <Text style={styles.rowStatusPartial}>{item.masteredCount}/{item.questionCount} mastered</Text>
+  return <Text style={styles.rowStatus}>Parsed</Text>
 }
 
 function Checkbox({ checked, onPress }: { checked: boolean; onPress: () => void }) {
@@ -58,7 +66,7 @@ function SubtopicRow({
       <Ionicons name="document-text-outline" size={16} color={Colors.textSecondary} />
       <View style={styles.rowInfo}>
         <Text style={styles.rowTitle} numberOfLines={1}>{subtopic.title}</Text>
-        {ids.length > 0 && <Text style={styles.rowStatus}>Parsed</Text>}
+        <MasteryStatus noteCount={ids.length} item={subtopic} />
       </View>
     </View>
   )
@@ -87,7 +95,7 @@ function TopicRow({
         <Ionicons name="document-text-outline" size={18} color={Colors.textSecondary} />
         <View style={styles.rowInfo}>
           <Text style={styles.rowTitle} numberOfLines={1}>{topic.title}</Text>
-          {topic.notes.length > 0 && <Text style={styles.rowStatus}>Parsed</Text>}
+          <MasteryStatus noteCount={ids.length} item={topic} />
         </View>
       </View>
       {topic.subtopics.map(sub => (
@@ -203,6 +211,7 @@ const styles = StyleSheet.create({
   rowInfo:   { flex: 1 },
   rowTitle:  { fontSize: Typography.sm, color: Colors.textPrimary },
   rowStatus: { fontSize: Typography.xs, color: Colors.success, marginTop: 1 },
+  rowStatusPartial: { fontSize: Typography.xs, color: Colors.textSecondary, marginTop: 1 },
   checkbox: {
     width: 20, height: 20, borderRadius: Radius.sm, borderWidth: 2,
     borderColor: Colors.border, alignItems: 'center', justifyContent: 'center',

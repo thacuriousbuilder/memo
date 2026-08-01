@@ -155,7 +155,7 @@ function SetupScreen({
     sublesson:  'Sub-lesson Quiz',
     lesson_all: 'Full Lesson Quiz',
     section:    'Section Quiz',
-    course:     'Course Quiz',
+    course:     'Subject Quiz',
     quick:      'Quick Quiz',
     review:     'Review Mistakes',
     practice:   'Practice Quiz',

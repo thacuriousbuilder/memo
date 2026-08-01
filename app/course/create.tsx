@@ -116,14 +116,14 @@ function StepDetails({
   const effectiveGroup = customGroup.trim() || courseGroup
 
   const handleNext = () => {
-    if (!name.trim()) { Alert.alert('Required', 'Please enter a course name.'); return }
+    if (!name.trim()) { Alert.alert('Required', 'Please enter a subject name.'); return }
     onNext({ name: name.trim(), courseGroup: effectiveGroup, icon, color })
   }
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={styles.stepContainer} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <Text style={styles.fieldLabel}>Course name</Text>
+        <Text style={styles.fieldLabel}>Subject name</Text>
         <TextInput
           style={styles.input}
           value={name}
@@ -147,7 +147,7 @@ function StepDetails({
             style={[styles.chip, !courseGroup && !customGroup && styles.chipActive]}
             onPress={() => { setCourseGroup(''); setCustomGroup('') }}
           >
-            <Text style={[styles.chipText, !courseGroup && !customGroup && styles.chipTextActive]}>Other Courses</Text>
+            <Text style={[styles.chipText, !courseGroup && !customGroup && styles.chipTextActive]}>Other Subjects</Text>
           </TouchableOpacity>
         </View>
         <TextInput
@@ -448,7 +448,7 @@ function StepBuilding({
   tempNotes:     TempNote[]
 }) {
   const { user } = useSession()
-  const [status,   setStatus]   = useState('Creating course...')
+  const [status,   setStatus]   = useState('Creating subject...')
   const [error,    setError]    = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
   const [builtCourseId, setBuiltCourseId] = useState<string | null>(null)
@@ -468,7 +468,7 @@ function StepBuilding({
   const build = async () => {
     if (!user) return
     try {
-      await update('Creating course...', 5)
+      await update('Creating subject...', 5)
 
       const { data: course, error: courseErr } = await supabase
         .from('courses')
@@ -571,7 +571,7 @@ function StepBuilding({
       <View style={[styles.reminderPromptIcon, { backgroundColor: courseDetails.color + '22' }]}>
         <MaterialCommunityIcons name={courseDetails.icon as any} size={32} color={courseDetails.color} />
       </View>
-      <Text style={styles.analyzingTitle}>Your course is ready! 🎉</Text>
+      <Text style={styles.analyzingTitle}>Your subject is ready! 🎉</Text>
       <Text style={styles.analyzingSubtitle}>Now let Memo help you remember it with quick study sessions that fit your schedule.</Text>
 
       <TouchableOpacity
@@ -593,7 +593,7 @@ function StepBuilding({
   return (
     <View style={[styles.stepContainer, styles.centerFlex]}>
       <Text style={{ fontSize: 48 }}>🏗️</Text>
-      <Text style={styles.analyzingTitle}>Building your course</Text>
+      <Text style={styles.analyzingTitle}>Building your subject</Text>
       <Text style={styles.analyzingSubtitle}>{status}</Text>
       <View style={styles.buildProgressTrack}>
         <View style={[styles.buildProgressFill, { width: `${progress}%` }]} />
@@ -627,7 +627,7 @@ export default function CreateCourseScreen() {
         <TouchableOpacity onPress={handleBack}>
           <Ionicons name="close" size={24} color={Colors.textSecondary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>New course</Text>
+        <Text style={styles.headerTitle}>New subject</Text>
         <View style={{ width: 24 }} />
       </View>
 

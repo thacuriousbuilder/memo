@@ -3,6 +3,13 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useFocusEffect } from 'expo-router'
 import { supabase }       from '@/lib/supabase'
+import { getLatestCorrectnessMap } from '@/hooks/useQuiz'
+
+// A topic/subtopic counts as "mastered" once this share of its questions
+// are currently graduated (latest attempt correct). Never-attempted
+// questions count against mastery, not toward it — mastered should mean
+// the material has actually been covered and gotten right.
+const MASTERY_THRESHOLD = 0.9
 
 // ─────────────────────────────────────────
 // TYPES
@@ -14,15 +21,23 @@ export interface NoteRef {
   s3_key:         string
   has_questions:  boolean
   question_count: number
+  questionIds:    string[]
 }
 
-export interface SubtopicItem {
+export interface MasteryStats {
+  questionCount: number
+  masteredCount: number
+  masteryPct:    number
+  isMastered:    boolean
+}
+
+export interface SubtopicItem extends MasteryStats {
   id:    string
   title: string
   notes: NoteRef[]
 }
 
-export interface TopicItem {
+export interface TopicItem extends MasteryStats {
   id:        string
   title:     string
   notes:     NoteRef[]
@@ -63,8 +78,23 @@ function mapNotes(notes: any[]): NoteRef[] {
     s3_key:         n.s3_key,
     has_questions:  (n.questions?.length ?? 0) > 0,
     question_count: n.questions?.length ?? 0,
+    questionIds:    (n.questions ?? []).map((q: any) => q.id),
   }))
 }
+
+function computeMastery(questionIds: string[], correctness: Map<string, boolean>): MasteryStats {
+  const questionCount = questionIds.length
+  const masteredCount = questionIds.filter(id => correctness.get(id) === true).length
+  const masteryPct    = questionCount > 0 ? masteredCount / questionCount : 0
+  return {
+    questionCount,
+    masteredCount,
+    masteryPct,
+    isMastered: questionCount > 0 && masteryPct >= MASTERY_THRESHOLD,
+  }
+}
+
+const EMPTY_MASTERY: MasteryStats = { questionCount: 0, masteredCount: 0, masteryPct: 0, isMastered: false }
 // ─────────────────────────────────────────
 // HOOK
 // ─────────────────────────────────────────
@@ -117,7 +147,9 @@ export function useCourseOverview(
             id:    sub.id,
             title: sub.title,
             notes: mapNotes(sub.notes),
+            ...EMPTY_MASTERY,
           })),
+        ...EMPTY_MASTERY,
       })
 
       const folders: FolderItem[] = sortedSections
@@ -155,6 +187,27 @@ export function useCourseOverview(
 
       // Collect every topic/subtopic id across folders + unorganized
       const allTopics  = [...unorganizedTopics, ...folders.flatMap(f => f.topics)]
+
+      // ── Mastery — one batched query for every question in the course,
+      // then aggregated per topic/subtopic (topic pools its own notes'
+      // questions plus all its subtopics' questions) ──
+      const allQuestionIds = Array.from(new Set(allTopics.flatMap(t => [
+        ...t.notes.flatMap(n => n.questionIds),
+        ...t.subtopics.flatMap(sub => sub.notes.flatMap(n => n.questionIds)),
+      ])))
+      const correctness = await getLatestCorrectnessMap(userId, allQuestionIds)
+
+      for (const topic of allTopics) {
+        for (const sub of topic.subtopics) {
+          Object.assign(sub, computeMastery(sub.notes.flatMap(n => n.questionIds), correctness))
+        }
+        const topicQuestionIds = [
+          ...topic.notes.flatMap(n => n.questionIds),
+          ...topic.subtopics.flatMap(sub => sub.notes.flatMap(n => n.questionIds)),
+        ]
+        Object.assign(topic, computeMastery(topicQuestionIds, correctness))
+      }
+
       const structuredTotal = allTopics.length + allTopics.reduce((s, t) => s + t.subtopics.length, 0)
       const structuredDone  =
         allTopics.filter(t => passedLessonIds.has(t.id)).length +

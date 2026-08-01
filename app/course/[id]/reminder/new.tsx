@@ -6,7 +6,7 @@ import {
 } from 'react-native'
 import { useState, useEffect } from 'react'
 import { router, useLocalSearchParams } from 'expo-router'
-import { Ionicons } from '@expo/vector-icons'
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import DateTimePicker from '@react-native-community/datetimepicker'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
 import { useSession } from '@/hooks/useSession'
@@ -236,7 +236,7 @@ export default function NewReminderScreen() {
               style={[styles.modeBtn, sessionType === 'blurt' && styles.modeBtnActive]}
               onPress={() => setSessionType('blurt')}
             >
-              <Ionicons name="pencil-outline" size={16} color={sessionType === 'blurt' ? '#fff' : Colors.textSecondary} />
+              <MaterialCommunityIcons name="account-voice" size={16} color={sessionType === 'blurt' ? '#fff' : Colors.textSecondary} />
               <Text style={[styles.modeBtnText, sessionType === 'blurt' && styles.modeBtnTextActive]}>Blurt</Text>
             </TouchableOpacity>
           </View>
@@ -258,40 +258,6 @@ export default function NewReminderScreen() {
               </View>
             </>
           )}
-
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.fieldLabel}>Study from</Text>
-            <Text style={styles.sectionSummary}>
-              {scopeItems.length === 0 ? 'All materials' : `${scopeItems.length} selected`}
-            </Text>
-          </View>
-          {sessionType === 'blurt' && (
-            <Text style={styles.scopeHint}>
-              Blurt needs a specific topic or subtopic, whole-course and folder selections aren't supported yet.
-            </Text>
-          )}
-          <View style={styles.scopeList}>
-            <ScopeRow
-              icon={<Ionicons name="layers-outline" size={16} color={Colors.primary} />}
-              label="All materials"
-              checked={scopeItems.length === 0}
-              onPress={toggleAllMaterials}
-              disabled={sessionType === 'blurt'}
-            />
-          {course.folders.map(folder => (
-          <View key={folder.id}>
-            <ScopeRow
-              icon={<Ionicons name="folder-outline" size={16} color={Colors.primary} />}
-              label={folder.title}
-              checked={isScopeChecked(folder.id)}
-              onPress={() => toggleScopeItem({ scopeType: 'folder', scopeId: folder.id, title: folder.title })}
-              disabled={sessionType === 'blurt' && !isScopeChecked(folder.id)}
-            />
-            {folder.topics.map(renderTopic)}
-          </View>
-        ))}
-            {course.unorganizedTopics.map(renderTopic)}
-          </View>
 
           <Text style={styles.fieldLabel}>Repeat on</Text>
           <View style={styles.quickDayRow}>
@@ -342,6 +308,40 @@ export default function NewReminderScreen() {
                 )}
               </View>
             )}
+
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.fieldLabel}>Study from</Text>
+            <Text style={styles.sectionSummary}>
+              {scopeItems.length === 0 ? 'All materials' : `${scopeItems.length} selected`}
+            </Text>
+          </View>
+          {sessionType === 'blurt' && (
+            <Text style={styles.scopeHint}>
+              Blurt needs a specific topic or subtopic, whole-course and folder selections aren't supported yet.
+            </Text>
+          )}
+          <View style={styles.scopeList}>
+            <ScopeRow
+              icon={<Ionicons name="layers-outline" size={16} color={Colors.primary} />}
+              label="All materials"
+              checked={scopeItems.length === 0}
+              onPress={toggleAllMaterials}
+              disabled={sessionType === 'blurt'}
+            />
+          {course.folders.map(folder => (
+          <View key={folder.id}>
+            <ScopeRow
+              icon={<Ionicons name="folder-outline" size={16} color={Colors.primary} />}
+              label={folder.title}
+              checked={isScopeChecked(folder.id)}
+              onPress={() => toggleScopeItem({ scopeType: 'folder', scopeId: folder.id, title: folder.title })}
+              disabled={sessionType === 'blurt' && !isScopeChecked(folder.id)}
+            />
+            {folder.topics.map(renderTopic)}
+          </View>
+        ))}
+            {course.unorganizedTopics.map(renderTopic)}
+          </View>
 
           {isEditing && (
             <TouchableOpacity style={styles.deleteRow} onPress={handleDelete}>

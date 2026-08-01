@@ -41,14 +41,17 @@ function RecommendationRow({ rec, onPress }: { rec: Recommendation; onPress: () 
 // PRACTICE ROW
 // ─────────────────────────────────────────
 function PracticeRow({
-  icon, title, subtitle, onPress, disabled, loading,
+  icon, title, subtitle, onPress, disabled, loading, iconSet = 'ionicons',
 }: {
   icon: string; title: string; subtitle: string; onPress: () => void; disabled?: boolean; loading?: boolean
+  iconSet?: 'ionicons' | 'material'
 }) {
   return (
     <TouchableOpacity style={[styles.row, disabled && { opacity: 0.5 }]} onPress={onPress} activeOpacity={0.7} disabled={disabled || loading}>
       <View style={styles.practiceIconBadge}>
-        <Ionicons name={icon as any} size={20} color={Colors.primary} />
+        {iconSet === 'material'
+          ? <MaterialCommunityIcons name={icon as any} size={20} color={Colors.primary} />
+          : <Ionicons name={icon as any} size={20} color={Colors.primary} />}
       </View>
       <View style={styles.rowInfo}>
         <Text style={styles.rowTitle} numberOfLines={1}>{title}</Text>
@@ -141,7 +144,7 @@ export default function StudyScreen() {
     try {
       const scope = await pickRandomBlurtScope(user.id)
       if (!scope) {
-        Alert.alert('No materials yet', 'Add some notes to a course first — Quick Blurt picks a random topic to free-recall.')
+        Alert.alert('No materials yet', 'Add some notes to a subject first — Quick Blurt picks a random topic to free-recall.')
         return
       }
       router.push({
@@ -245,7 +248,7 @@ export default function StudyScreen() {
               </View>
               <View style={styles.rowInfo}>
                 <Text style={styles.rowTitle}>Quick Quiz</Text>
-                <Text style={styles.rowSub}>Random questions from your courses</Text>
+                <Text style={styles.rowSub}>Random questions from your subjects</Text>
                 <View style={styles.countRow}>
                   <QuickQuizCountRow count={5} onPress={() => startQuickQuiz(5)} />
                   <QuickQuizCountRow count={10} onPress={() => startQuickQuiz(10)} />
@@ -255,7 +258,8 @@ export default function StudyScreen() {
             </View>
             <View style={styles.divider} />
             <PracticeRow
-              icon="refresh"
+              icon="account-voice"
+              iconSet="material"
               title="Quick Blurt"
               subtitle="Free-recall a random topic from memory"
               onPress={startQuickBlurt}

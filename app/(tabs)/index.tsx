@@ -99,7 +99,7 @@ async function startPlanItem(item: PlanItem) {
 // NEXT UP TODAY
 // ─────────────────────────────────────────
 
-function NextUpCard({ item, laterCount }: { item: PlanItem | null; laterCount: number }) {
+function NextUpCard({ item, laterItems }: { item: PlanItem | null; laterItems: PlanItem[] }) {
   if (!item) return (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
@@ -116,8 +116,8 @@ function NextUpCard({ item, laterCount }: { item: PlanItem | null; laterCount: n
     </View>
   )
 
-  const total = laterCount + 1
-  const done  = 0
+  const total = laterItems.length + 1
+  const done  = laterItems.filter(i => i.done).length // nextUp is by construction never done
 
   return (
     <View style={styles.section}>
@@ -359,7 +359,7 @@ function EmptyHome() {
       <Text style={styles.emptyTitle}>Nothing scheduled yet</Text>
       <Text style={styles.emptySub}>Set a study reminder to see your plan here.</Text>
       <TouchableOpacity style={styles.emptyButton} onPress={() => router.push('/(tabs)/courses')} activeOpacity={0.8}>
-        <Text style={styles.emptyButtonText}>Go to Courses</Text>
+        <Text style={styles.emptyButtonText}>Go to Subjects</Text>
       </TouchableOpacity>
     </View>
   )
@@ -404,7 +404,7 @@ export default function HomeScreen() {
           <EmptyHome />
         ) : (
           <>
-          <NextUpCard item={data?.next_up ?? null} laterCount={data?.later_today.length ?? 0} />
+          <NextUpCard item={data?.next_up ?? null} laterItems={data?.later_today ?? []} />
           <LaterTodaySection items={data?.later_today ?? []} />
             <UpcomingTestsSection exams={data?.upcoming_exams ?? []} />
             <WeeklyScheduleSection items={data?.week_plan ?? []} />

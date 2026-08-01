@@ -10,12 +10,105 @@ import { useState } from 'react'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
 import { useSession } from '@/hooks/useSession'
-import { useCourseOverview } from '@/hooks/useCourseOverview'
+import { useCourseOverview, CourseOverview, TopicItem } from '@/hooks/useCourseOverview'
 import { useExams, createExam, deleteExam } from '@/hooks/useExams'
 import StudyMaterialsList from '@/components/studyMaterialsList'
-import { useReminders, toggleReminder, formatDaysOfWeek, formatTime } from '@/hooks/useReminders'
+import { useReminders, toggleReminder, updateReminder, formatDaysOfWeek, formatTime, Reminder } from '@/hooks/useReminders'
+import { pickRandomBlurtScope } from '@/hooks/useStudyOverview'
+import StudyModeSheet from '@/components/modals/studyModeSheet'
 import { Switch } from 'react-native'
 import { parseLocalDate } from '@/hooks/useExams'
+
+// ─────────────────────────────────────────
+// REMINDER MASTERY — resolve a reminder's scope_items against the
+// course's topic/subtopic tree to find how much of what it studies is
+// mastered, and (if all of it is) what fresh topic to suggest adding.
+// ─────────────────────────────────────────
+function collectCourseTopics(course: CourseOverview): TopicItem[] {
+  return [...course.unorganizedTopics, ...course.folders.flatMap(f => f.topics)]
+}
+
+function resolveScopeUnits(reminder: Reminder, course: CourseOverview) {
+  const allTopics = collectCourseTopics(course)
+  if (reminder.scopeItems.length === 0) return allTopics // "All materials"
+
+  const units: { isMastered: boolean }[] = []
+  for (const item of reminder.scopeItems) {
+    if (item.scopeType === 'topic') {
+      const t = allTopics.find(t => t.id === item.scopeId)
+      if (t) units.push(t)
+    } else if (item.scopeType === 'subtopic') {
+      for (const t of allTopics) {
+        const s = t.subtopics.find(s => s.id === item.scopeId)
+        if (s) { units.push(s); break }
+      }
+    } else if (item.scopeType === 'folder') {
+      const folder = course.folders.find(f => f.id === item.scopeId)
+      if (folder) units.push(...folder.topics)
+    }
+  }
+  return units
+}
+
+function reminderMastery(reminder: Reminder, course: CourseOverview) {
+  const units = resolveScopeUnits(reminder, course)
+  const totalUnits    = units.length
+  const masteredUnits = units.filter(u => u.isMastered).length
+  return { totalUnits, masteredUnits }
+}
+
+function findNextUncoveredTopic(reminder: Reminder, course: CourseOverview): TopicItem | null {
+  if (reminder.scopeItems.length === 0) return null // "All materials" already covers everything
+
+  const allTopics = collectCourseTopics(course)
+  const coveredTopicIds = new Set<string>()
+
+  for (const item of reminder.scopeItems) {
+    if (item.scopeType === 'topic') {
+      coveredTopicIds.add(item.scopeId)
+    } else if (item.scopeType === 'folder') {
+      const folder = course.folders.find(f => f.id === item.scopeId)
+      folder?.topics.forEach(t => coveredTopicIds.add(t.id))
+    } else if (item.scopeType === 'subtopic') {
+      const parent = allTopics.find(t => t.subtopics.some(s => s.id === item.scopeId))
+      if (parent) coveredTopicIds.add(parent.id)
+    }
+  }
+
+  return allTopics.find(t => !coveredTopicIds.has(t.id)) ?? null
+}
+
+// ─────────────────────────────────────────
+// BLURT SCOPE — Blurt needs exactly one topic/subtopic's material.
+// If the current file selection exactly matches one topic or subtopic,
+// use it; otherwise the caller falls back to a random pick in this
+// course (via pickRandomBlurtScope).
+// ─────────────────────────────────────────
+function noteIdsForTopic(topic: TopicItem): string[] {
+  return [...topic.notes.map(n => n.id), ...topic.subtopics.flatMap(s => s.notes.map(n => n.id))]
+}
+
+function resolveExactTopicSelection(
+  selectedIds: Set<string>,
+  course:      CourseOverview
+): { scopeType: 'topic' | 'subtopic'; scopeId: string; title: string } | null {
+  if (selectedIds.size === 0) return null
+  const allTopics = collectCourseTopics(course)
+
+  for (const topic of allTopics) {
+    const ids = noteIdsForTopic(topic)
+    if (ids.length > 0 && ids.length === selectedIds.size && ids.every(id => selectedIds.has(id))) {
+      return { scopeType: 'topic', scopeId: topic.id, title: topic.title }
+    }
+    for (const sub of topic.subtopics) {
+      const subIds = sub.notes.map(n => n.id)
+      if (subIds.length > 0 && subIds.length === selectedIds.size && subIds.every(id => selectedIds.has(id))) {
+        return { scopeType: 'subtopic', scopeId: sub.id, title: sub.title }
+      }
+    }
+  }
+  return null
+}
 
 // ─────────────────────────────────────────
 // GRADE BADGE
@@ -49,6 +142,8 @@ export default function CourseDetailScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const { reminders, refetch: refetchReminders } = useReminders(id ?? null, user?.id ?? null)
   const [managingMaterials, setManagingMaterials] = useState(false)
+  const [studyModeVisible, setStudyModeVisible] = useState(false)
+  const [resolvingBlurt, setResolvingBlurt] = useState(false)
 
 
 
@@ -67,6 +162,83 @@ export default function CourseDetailScreen() {
     } catch (err: any) {
       Alert.alert('Error', err.message)
     }
+  }
+
+  const handleSelectQuiz = () => {
+    if (!course) return
+    const hasSelection = selectedIds.size > 0
+    router.push({
+      pathname: '/study/[id]',
+      params: {
+        id:      course.id,
+        mode:    hasSelection ? 'custom' : 'course',
+        title:   course.title,
+        ...(hasSelection ? { noteIds: JSON.stringify(Array.from(selectedIds)) } : {}),
+      },
+    })
+  }
+
+  const handleSelectBlurt = async () => {
+    if (!course || !user || resolvingBlurt) return
+    setResolvingBlurt(true)
+    try {
+      const scope = resolveExactTopicSelection(selectedIds, course)
+        ?? await pickRandomBlurtScope(user.id, course.id)
+
+      if (!scope) {
+        Alert.alert('No materials yet', 'Add some notes to this subject first — Blurt needs at least one topic to free-recall.')
+        return
+      }
+
+      router.push({
+        pathname: '/blurt/[id]',
+        params: {
+          id:        scope.scopeId,
+          scopeType: scope.scopeType,
+          scopeId:   scope.scopeId,
+          title:     scope.title,
+        },
+      })
+    } catch (err: any) {
+      Alert.alert('Error', err.message ?? 'Could not start Blurt.')
+    } finally {
+      setResolvingBlurt(false)
+    }
+  }
+
+  const handleAddMoreMaterial = (reminder: Reminder) => {
+    if (!course) return
+    const next = findNextUncoveredTopic(reminder, course)
+    if (!next) {
+      Alert.alert('All caught up!', 'You\'ve mastered every topic in this subject.')
+      return
+    }
+    Alert.alert(
+      'Add more material?',
+      `Add "${next.title}" to "${reminder.label}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Add',
+          onPress: async () => {
+            try {
+              await updateReminder({
+                reminderId:    reminder.id,
+                label:         reminder.label,
+                scopeItems:    [...reminder.scopeItems, { scopeType: 'topic', scopeId: next.id, title: next.title }],
+                daysOfWeek:    reminder.daysOfWeek,
+                time:          reminder.timeOfDay,
+                sessionType:   reminder.sessionType,
+                questionCount: reminder.questionCount,
+              })
+              refetchReminders()
+            } catch (err: any) {
+              Alert.alert('Error', err.message)
+            }
+          },
+        },
+      ]
+    )
   }
 
   const getDaysLabel = (daysLeft: number): string => {
@@ -146,7 +318,10 @@ export default function CourseDetailScreen() {
           </TouchableOpacity>
         ) : (
           <View style={{ gap: Spacing.sm }}>
-            {reminders.map(reminder => (
+            {reminders.map(reminder => {
+            const mastery = reminder.sessionType === 'quiz' ? reminderMastery(reminder, course) : null
+            const fullyMastered = !!mastery && mastery.totalUnits > 0 && mastery.masteredUnits === mastery.totalUnits
+            return (
             <TouchableOpacity
               key={reminder.id}
               style={styles.reminderRow}
@@ -161,6 +336,18 @@ export default function CourseDetailScreen() {
                 <Text style={styles.examDate}>
                   {formatTime(reminder.timeOfDay)} · {formatDaysOfWeek(reminder.daysOfWeek)}
                 </Text>
+                {mastery && mastery.totalUnits > 0 && (
+                  fullyMastered ? (
+                    <TouchableOpacity
+                      onPress={() => handleAddMoreMaterial(reminder)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Text style={styles.masteredChipText}>✨ All mastered — add more?</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <Text style={styles.masteryText}>{mastery.masteredUnits}/{mastery.totalUnits} mastered</Text>
+                  )
+                )}
               </View>
               <Switch
                 value={reminder.isActive}
@@ -169,7 +356,8 @@ export default function CourseDetailScreen() {
                 thumbColor="#fff"
               />
             </TouchableOpacity>
-          ))}
+            )
+          })}
           </View>
         )}
       </View>
@@ -276,7 +464,7 @@ export default function CourseDetailScreen() {
           </View>
         </View>
         {!managingMaterials && (
-          <Text style={styles.materialsHint}>Select materials to build a quiz</Text>
+          <Text style={styles.materialsHint}>Select materials to build a quiz/blurt</Text>
         )}
         <StudyMaterialsList
           course={course}
@@ -289,29 +477,32 @@ export default function CourseDetailScreen() {
       <TouchableOpacity
         style={styles.quizButton}
         activeOpacity={0.8}
-        onPress={() => {
-          const hasSelection = selectedIds.size > 0
-          router.push({
-            pathname: '/study/[id]',
-            params: {
-              id:      course.id,
-              mode:    hasSelection ? 'custom' : 'course',
-              title:   course.title,
-              ...(hasSelection ? { noteIds: JSON.stringify(Array.from(selectedIds)) } : {}),
-            },
-          })
-        }}
+        disabled={resolvingBlurt}
+        onPress={() => setStudyModeVisible(true)}
       >
-        <Ionicons name="play" size={16} color="#fff" />
-        <Text style={styles.quizButtonText}>
-          {selectedIds.size === 0
-            ? 'Study whole course'
-            : selectedIds.size === 1
-            ? 'Study 1 selected file'
-            : `Study ${selectedIds.size} selected files`}
-        </Text>
+        {resolvingBlurt ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <>
+            <Ionicons name="play" size={16} color="#fff" />
+            <Text style={styles.quizButtonText}>
+              {selectedIds.size === 0
+                ? 'Study whole subject'
+                : selectedIds.size === 1
+                ? 'Study 1 selected file'
+                : `Study ${selectedIds.size} selected files`}
+            </Text>
+          </>
+        )}
       </TouchableOpacity>
       </ScrollView>
+
+      <StudyModeSheet
+        visible={studyModeVisible}
+        onClose={() => setStudyModeVisible(false)}
+        onSelectQuiz={handleSelectQuiz}
+        onSelectBlurt={handleSelectBlurt}
+      />
     </View>
   )
 }
@@ -392,4 +583,6 @@ pastTestsToggleText: { fontSize: Typography.xs, color: Colors.textMuted, fontWei
     borderRadius: Radius.lg, padding: Spacing.md, backgroundColor: Colors.card,
   },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xl },
+  masteryText: { fontSize: Typography.xs, color: Colors.textSecondary, marginTop: 2 },
+  masteredChipText: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.primary, marginTop: 2 },
 })

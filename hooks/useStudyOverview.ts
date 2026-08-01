@@ -335,12 +335,15 @@ export async function fetchBlurtSessionDetail(ids: string[]): Promise<{
 // a blurt prompt is generated for one topic's material — so "quick"
 // here means picking a random topic that has notes, not mixing topics.
 // ─────────────────────────────────────────
-export async function pickRandomBlurtScope(userId: string): Promise<{
+export async function pickRandomBlurtScope(
+  userId:    string,
+  courseId?: string
+): Promise<{
   scopeType: 'topic' | 'subtopic'
   scopeId:   string
   title:     string
 } | null> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('courses')
     .select(`
       sections (
@@ -352,6 +355,10 @@ export async function pickRandomBlurtScope(userId: string): Promise<{
       )
     `)
     .eq('user_id', userId)
+
+  if (courseId) query = query.eq('id', courseId)
+
+  const { data, error } = await query
 
   if (error) throw error
 

@@ -135,7 +135,7 @@ export async function fetchQuestions(params: {
 
   await ensureQuestionsExist(noteIds, params.userId)
 
-  return getQuestionsForNotes(noteIds, params.count)
+  return getQuestionsForNotes(noteIds, params.count, params.userId)
 }
 
 // ─────────────────────────────────────────
@@ -205,11 +205,62 @@ async function getNotesByUser(userId: string): Promise<string[]> {
 }
 
 // ─────────────────────────────────────────
-// FETCH + SHUFFLE QUESTIONS
+// LATEST-ATTEMPT CORRECTNESS — shared primitive
+// A question only counts as "missed" if its MOST RECENT attempt was
+// wrong; a later correct answer graduates it immediately. No time
+// decay — this is the one thing that clears a miss.
+// ─────────────────────────────────────────
+export async function getLatestCorrectnessMap(
+  userId:      string,
+  questionIds: string[]
+): Promise<Map<string, boolean>> {
+  if (!questionIds.length) return new Map()
+
+  const { data, error } = await supabase
+    .from('attempt_answers')
+    .select('question_id, is_correct, quiz_attempts!inner(user_id, completed_at)')
+    .in('question_id', questionIds)
+    .eq('quiz_attempts.user_id', userId)
+
+  if (error) throw error
+
+  // attempt_answers -> quiz_attempts is many-to-one (each answer row nests
+  // a single quiz_attempts object, not an array), so there's no nested
+  // array for .order(col, {foreignTable}) to reorder. Sorting client-side
+  // on the nested completed_at is the correct, unambiguous approach.
+  const sorted = (data ?? []).slice().sort((a: any, b: any) =>
+    new Date(a.quiz_attempts.completed_at).getTime() -
+    new Date(b.quiz_attempts.completed_at).getTime()
+  )
+
+  const latest = new Map<string, boolean>()
+  for (const row of sorted) {
+    latest.set(row.question_id, row.is_correct) // ascending order → last write = most recent
+  }
+  return latest
+}
+
+async function getMissedQuestionIds(
+  userId:      string,
+  questionIds: string[]
+): Promise<Set<string>> {
+  const latest = await getLatestCorrectnessMap(userId, questionIds)
+  const missed = new Set<string>()
+  for (const [id, isCorrect] of latest) if (!isCorrect) missed.add(id)
+  return missed
+}
+
+// ─────────────────────────────────────────
+// FETCH + BLEND QUESTIONS — miss pool + fresh pool
+// Blends in previously-missed-and-not-yet-corrected questions
+// (capped at 50% of the session, never more than actually exist),
+// filling the rest from fresh/graduated questions. Falls back to
+// pure random when there's no miss history in scope.
 // ─────────────────────────────────────────
 async function getQuestionsForNotes(
   noteIds: string[],
-  count:   number
+  count:   number,
+  userId:  string
 ): Promise<QuizQuestion[]> {
   const { data, error } = await supabase
     .from('questions')
@@ -231,8 +282,41 @@ async function getQuestionsForNotes(
 
   if (error) throw error
 
-  const shuffled = shuffle(data ?? [])
-  return shuffled.slice(0, count).map(q => ({
+  const pool = data ?? []
+  if (!pool.length) return []
+
+  const missedIds = await getMissedQuestionIds(userId, pool.map(q => q.id))
+
+  let selected: typeof pool
+
+  if (!missedIds.size) {
+    selected = shuffle(pool).slice(0, count)
+  } else {
+    const missPool  = pool.filter(q => missedIds.has(q.id))
+    const freshPool = pool.filter(q => !missedIds.has(q.id))
+
+    const missCap   = Math.floor(count * 0.5)
+    const missTaken = Math.min(missCap, missPool.length, count)
+
+    const shuffledMiss  = shuffle(missPool)
+    const shuffledFresh = shuffle(freshPool)
+
+    const pickedMiss = shuffledMiss.slice(0, missTaken)
+    const remaining  = count - pickedMiss.length
+    let pickedFresh  = shuffledFresh.slice(0, remaining)
+
+    // Fresh pool smaller than remaining slots — backfill from leftover
+    // miss questions rather than under-filling the session.
+    if (pickedFresh.length < remaining) {
+      const shortfall    = remaining - pickedFresh.length
+      const leftoverMiss = shuffledMiss.slice(missTaken)
+      pickedFresh = pickedFresh.concat(leftoverMiss.slice(0, shortfall))
+    }
+
+    selected = shuffle([...pickedMiss, ...pickedFresh])
+  }
+
+  return selected.map(q => ({
     ...q,
     answer_options: (q.answer_options ?? []).sort(
       (a: any, b: any) => a.option_index - b.option_index
@@ -257,7 +341,14 @@ async function getWrongAnswerQuestions(
   if (!wrong?.length) return []
 
   const uniqueIds = [...new Set(wrong.map((a: any) => a.question_id))]
-  const picked    = shuffle(uniqueIds).slice(0, count)
+
+  // Graduation-aware: only resurface questions whose MOST RECENT attempt
+  // (which may postdate this "ever wrong" snapshot) is still wrong.
+  const missedIds   = await getMissedQuestionIds(userId, uniqueIds)
+  const stillMissed = uniqueIds.filter(id => missedIds.has(id))
+  if (!stillMissed.length) return []
+
+  const picked = shuffle(stillMissed).slice(0, count)
 
   const { data } = await supabase
     .from('questions')

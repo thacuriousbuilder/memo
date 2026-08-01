@@ -179,7 +179,7 @@ export default function ProfileScreen() {
       <View style={styles.statsRow}>
         <View style={styles.statCard}>
           <Text style={styles.statValue}>{courseCount}</Text>
-          <Text style={styles.statLabel}>Courses</Text>
+          <Text style={styles.statLabel}>Subjects</Text>
         </View>
         <View style={styles.statCard}>
           <Text style={styles.statValue}>{completedQ}</Text>

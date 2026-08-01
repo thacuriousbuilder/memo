@@ -24,7 +24,7 @@ const TABS: TabConfig[] = [
   },
   {
     name:       'courses',
-    title:      'Courses',
+    title:      'Subjects',
     icon:       'book-outline',
     activeIcon: 'book',
   },

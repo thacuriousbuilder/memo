@@ -31,7 +31,7 @@ function CourseCard({
 
   const handleDelete = () => {
     Alert.alert(
-      'Delete Course',
+      'Delete Subject',
       `Delete "${course.title}"? This will permanently remove all lessons, notes, and questions.`,
       [
         { text: 'Cancel', style: 'cancel' },
@@ -198,7 +198,7 @@ export default function CoursesScreen() {
     <View style={styles.root}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Courses</Text>
+        <Text style={styles.headerTitle}>Subjects</Text>
         <TouchableOpacity
           style={styles.newCourseButton}
           activeOpacity={0.7}
@@ -227,9 +227,9 @@ export default function CoursesScreen() {
       ) : courses.length === 0 ? (
         <EmptyState
           icon="book-outline"
-          title="No Courses Yet"
-          subtitle="Create your first course to start organizing your study materials."
-          actionLabel="New Course"
+          title="No Subjects Yet"
+          subtitle="Create your first subject to start organizing your study materials."
+          actionLabel="New Subject"
           onAction={() => router.push('/course/create')}
         />
       ) : (

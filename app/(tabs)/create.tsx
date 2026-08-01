@@ -18,8 +18,8 @@ const OPTIONS = [
     id:       'course',
     icon:     'book',
     iconBg:   Colors.primary,
-    title:    'Create Course',
-    subtitle: 'Start a new course from scratch',
+    title:    'Create Subject',
+    subtitle: 'Start a new subject from scratch',
     action:   'new_course' as const,
   },
   {
@@ -27,7 +27,7 @@ const OPTIONS = [
     icon:     'add-circle',
     iconBg:   Colors.textMuted,
     title:    'Add Note',
-    subtitle: 'Add a Note to an existing course',
+    subtitle: 'Add a Note to an existing subject',
     action:   'new_lesson' as const,
   },
   {
@@ -35,7 +35,7 @@ const OPTIONS = [
     icon:     'document-text',
     iconBg:   Colors.textMuted,
     title:    'Add Test',
-    subtitle: 'Track an exam for an existing course',
+    subtitle: 'Track an exam for an existing subject',
     action:   'new_test' as const,
   },
 ]
@@ -59,12 +59,12 @@ function CoursePickerSheet({
         <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
         <View style={styles.sheet}>
           <View style={styles.handle} />
-          <Text style={styles.sheetTitle}>Choose a course</Text>
+          <Text style={styles.sheetTitle}>Choose a subject</Text>
 
           {loading ? (
             <ActivityIndicator color={Colors.primary} style={{ marginVertical: Spacing.xl }} />
           ) : courses.length === 0 ? (
-            <Text style={styles.sheetEmpty}>No courses yet — create one first.</Text>
+            <Text style={styles.sheetEmpty}>No subjects yet — create one first.</Text>
           ) : (
             <FlatList
               data={courses}

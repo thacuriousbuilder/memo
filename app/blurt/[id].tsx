@@ -6,7 +6,7 @@ import {
   } from 'react-native'
   import { useState, useEffect } from 'react'
   import { router, useLocalSearchParams } from 'expo-router'
-  import { Ionicons } from '@expo/vector-icons'
+  import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
   import {
     useAudioRecorder, useAudioRecorderState, AudioModule, RecordingPresets,
     setAudioModeAsync,
@@ -70,7 +70,7 @@ import {
   
         <View style={styles.setupHeader}>
           <View style={styles.setupIconWrapper}>
-            <Ionicons name="chatbubble-ellipses-outline" size={32} color={Colors.primary} />
+            <MaterialCommunityIcons name="account-voice" size={32} color={Colors.primary} />
           </View>
           <Text style={styles.setupMode}>BLURT</Text>
           <Text style={styles.setupTitle}>{title}</Text>
@@ -102,7 +102,7 @@ import {
           disabled={!selected}
           activeOpacity={0.8}
         >
-          <Ionicons name="chatbubble-ellipses" size={20} color={Colors.textInverse} />
+          <MaterialCommunityIcons name="account-voice" size={20} color={Colors.textInverse} />
           <Text style={styles.startButtonText}>Start Blurt</Text>
         </TouchableOpacity>
       </ScrollView>

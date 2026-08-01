@@ -45,7 +45,7 @@ import {
   
     const handleSave = async () => {
         if (!course) return
-        if (!title.trim()) { Alert.alert('Required', 'Please enter a course name.'); return }
+        if (!title.trim()) { Alert.alert('Required', 'Please enter a subject name.'); return }
       
         setSaving(true)
         try {
@@ -68,7 +68,7 @@ import {
     const handleDelete = () => {
       if (!course) return
       Alert.alert(
-        'Delete Course',
+        'Delete Subject',
         `Delete "${course.title}"? This will permanently remove all lessons, notes, and questions.`,
         [
           { text: 'Cancel', style: 'cancel' },
@@ -99,7 +99,7 @@ import {
           <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="close" size={24} color={Colors.textSecondary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Edit course</Text>
+          <Text style={styles.headerTitle}>Edit subject</Text>
           <TouchableOpacity onPress={handleSave} disabled={saving}>
             {saving
               ? <ActivityIndicator color={Colors.primary} />
@@ -108,7 +108,7 @@ import {
         </View>
   
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-          <Text style={styles.fieldLabel}>Course name</Text>
+          <Text style={styles.fieldLabel}>Subject name</Text>
           <TextInput
             style={styles.input}
             value={title}
@@ -131,7 +131,7 @@ import {
               style={[styles.chip, !courseGroup && !customGroup && styles.chipActive]}
               onPress={() => { setCourseGroup(''); setCustomGroup('') }}
             >
-              <Text style={[styles.chipText, !courseGroup && !customGroup && styles.chipTextActive]}>Other Courses</Text>
+              <Text style={[styles.chipText, !courseGroup && !customGroup && styles.chipTextActive]}>Other Subjects</Text>
             </TouchableOpacity>
           </View>
           <TextInput
@@ -176,7 +176,7 @@ import {
   
           <TouchableOpacity style={styles.deleteRow} onPress={handleDelete}>
             <Ionicons name="trash-outline" size={16} color={Colors.error} />
-            <Text style={styles.deleteText}>Delete course</Text>
+            <Text style={styles.deleteText}>Delete subject</Text>
           </TouchableOpacity>
         </ScrollView>
       </View>
