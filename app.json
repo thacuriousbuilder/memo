@@ -1,25 +1,60 @@
 {
   "expo": {
-    "name": "memo",
+    "name": "Memo",
     "slug": "memo",
     "version": "1.0.0",
+    "scheme": "memo",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-web-browser",
+      [
+        "expo-document-picker",
+        {
+          "iCloudContainerEnvironment": "Production"
+        }
+      ],
+      "@react-native-community/datetimepicker",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.604899706209-ag9ic3h6oc95e9petfgnpp0ts5fo7a5e"
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Memo to access your microphone so you can record voice answers for Blurt sessions."
+        }
+      ]
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.trymemo.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Allow Memo to access your photo library to upload study materials.",
+        "NSDocumentsFolderUsageDescription": "Allow Memo to access your documents to upload study materials.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#0d0d0d"
       },
-      "predictiveBackGestureEnabled": false
+      "package": "com.trymemo.app",
+      "versionCode": 1
     },
     "web": {
-      "favicon": "./assets/favicon.png"
-    }
+      "bundler": "metro"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "e73acab0-f5ee-4a63-a5f6-66814e18f3b5"
+      }
+    },
+    "owner": "thacuriousbuilder"
   }
 }
