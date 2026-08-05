@@ -310,21 +310,30 @@ function WeeklyScheduleSection({ items }: { items: WeekPlanItem[] }) {
             </View>
           ) : (
             <View style={styles.cardList}>
-            {dayItems.map((item) => (
-              <View key={item.reminderId + item.dayIndex} style={styles.cardRow}>
-                <View style={[styles.rowIconBadge, { backgroundColor: (item.courseColor ?? Colors.primary) + '22' }]}>
-                  <MaterialCommunityIcons name={item.courseEmoji as any} size={20} color={item.courseColor ?? Colors.primary} />
+            {dayItems.map((item) => {
+              const hasStatus = item.done !== null
+              return (
+                <View key={item.reminderId + item.dayIndex} style={styles.cardRow}>
+                  <View style={[styles.rowIconBadge, { backgroundColor: (item.courseColor ?? Colors.primary) + '22' }, item.done && { opacity: 0.4 }]}>
+                    <MaterialCommunityIcons name={item.courseEmoji as any} size={20} color={item.courseColor ?? Colors.primary} />
+                  </View>
+                  <View style={styles.rowInfo}>
+                    <Text style={[styles.rowTitle, item.done && styles.doneText]} numberOfLines={1}>{item.label}</Text>
+                    <Text style={styles.rowMeta} numberOfLines={1}>
+                      {item.courseTitle}
+                      {item.sessionType === 'blurt' ? ' · Free-recall' : ` · ${item.questionCount ?? '—'} questions`}
+                    </Text>
+                  </View>
+                  {hasStatus ? (
+                    item.done
+                      ? <Ionicons name="checkmark-circle" size={20} color={Colors.success} />
+                      : <Ionicons name="ellipse-outline" size={20} color={Colors.textMuted} />
+                  ) : (
+                    <Text style={styles.dayItemTime}>{item.time}</Text>
+                  )}
                 </View>
-                <View style={styles.rowInfo}>
-                  <Text style={styles.rowTitle} numberOfLines={1}>{item.label}</Text>
-                  <Text style={styles.rowMeta} numberOfLines={1}>
-                    {item.courseTitle}
-                    {item.sessionType === 'blurt' ? ' · Free-recall' : ` · ${item.questionCount ?? '—'} questions`}
-                  </Text>
-                </View>
-                <Text style={styles.dayItemTime}>{item.time}</Text>
-              </View>
-            ))}
+              )
+            })}
           </View>
           )}
         </>

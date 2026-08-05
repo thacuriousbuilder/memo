@@ -42,6 +42,8 @@ export interface WeekPlanItem {
   timeValue:     number
   sessionType:   SessionType
   questionCount: number | null
+  // null for days that haven't happened yet (today's index or earlier only)
+  done:          boolean | null
 }
 
 export interface EndedAutoPlan {
@@ -363,16 +365,44 @@ export function useDashboard(userId: string | null) {
         .filter(i => i !== nextUp)
         .sort((a, b) => Number(a.done) - Number(b.done) || a.timeValue - b.timeValue)
 
-      // ── Full week plan (all days) — Auto entries show today's resolved
-      // session type/level as a representative approximation rather than
-      // re-resolving every future date, since the actual pick only ever
-      // matters live, the day it happens ──
+      // ── Full week plan (current Mon–Sun week) — Auto entries show today's
+      // resolved session type/level as a representative approximation rather
+      // than re-resolving every future date, since the actual pick only ever
+      // matters live, the day it happens. For days at or before today, we
+      // also resolve a per-occurrence `done` by checking attempts against
+      // that specific calendar date (same heuristic as today's done-check);
+      // days after today stay `null` since they haven't happened yet. ──
+      const todayMonFirst = (todayDow + 6) % 7
+      const weekStartDate = new Date(todayMidnight)
+      weekStartDate.setDate(weekStartDate.getDate() - todayMonFirst)
+
       const weekPlan: WeekPlanItem[] = []
       for (const r of reminders) {
         if (!r.courses) continue
         if (r.reminder_mode === 'auto' && r.plan_end_date && parseLocalDate(r.plan_end_date) < todayMidnight) continue
+        const scopeItems = mapScopeItems(r.scope_items)
         for (const dow of r.days_of_week ?? []) {
           const dayIndex = (dow + 6) % 7
+          const occurrenceDate = new Date(weekStartDate)
+          occurrenceDate.setDate(occurrenceDate.getDate() + dayIndex)
+
+          let done: boolean | null = null
+          if (occurrenceDate <= todayMidnight) {
+            const occStr = occurrenceDate.toDateString()
+            const occAttempts = attempts.filter((a: any) => new Date(a.completed_at).toDateString() === occStr)
+            const occBlurtAttempts = blurtAttempts.filter((a: any) => new Date(a.created_at).toDateString() === occStr)
+            const selfDone = occAttempts.some((a: any) => a.reminder_id === r.id) ||
+              occBlurtAttempts.some((a: any) => a.reminder_id === r.id)
+            const scopeDone = r.reminder_mode !== 'auto' && occAttempts.some((a: any) => {
+              if (scopeItems.length === 0) return a.course_id === r.courses.id
+              return scopeItems.some((s: ScopeItem) =>
+                (s.scopeType === 'topic' && a.lesson_id === s.scopeId) ||
+                (s.scopeType === 'subtopic' && a.sub_lesson_id === s.scopeId)
+              )
+            })
+            done = selfDone || scopeDone
+          }
+
           weekPlan.push({
             reminderId:    r.id,
             dayIndex,
@@ -385,6 +415,7 @@ export function useDashboard(userId: string | null) {
             timeValue:     timeToMinutes(r.time_of_day),
             sessionType:   r.reminder_mode === 'auto' ? 'quiz' : r.session_type,
             questionCount: r.reminder_mode === 'auto' ? (r.auto_question_level ?? 5) : r.question_count,
+            done,
           })
         }
       }
