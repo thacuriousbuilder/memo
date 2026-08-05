@@ -110,7 +110,7 @@ export interface DashboardData {
 // contingent on whether those sessions were actually completed. Uses
 // parseLocalDate for both endpoints to stay consistent with the rest of
 // the app's local-day-boundary convention.
-function sessionOrdinalForDate(planStartDate: string, daysOfWeek: number[], targetDate: Date): number {
+export function sessionOrdinalForDate(planStartDate: string, daysOfWeek: number[], targetDate: Date): number {
   const start = parseLocalDate(planStartDate)
   start.setHours(0, 0, 0, 0)
   const end = new Date(targetDate)

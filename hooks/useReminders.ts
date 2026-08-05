@@ -21,6 +21,7 @@ export interface ScopeItem {
 
 export interface Reminder {
   id:             string
+  courseId:       string
   label:          string
   scopeItems:     ScopeItem[]   // empty array = All materials (Manual only — Auto never stores scope)
   daysOfWeek:     number[]
@@ -37,7 +38,7 @@ export interface Reminder {
 }
 
 const REMINDER_COLUMNS = `
-  id, label, scope_items, days_of_week, is_active, time_of_day, session_type, question_count,
+  id, course_id, label, scope_items, days_of_week, is_active, time_of_day, session_type, question_count,
   reminder_mode, plan_duration_days, plan_start_date, plan_end_date, auto_question_level, auto_session_style
 `
 
@@ -110,6 +111,7 @@ export function useReminders(
 function mapRow(r: any): Reminder {
   return {
     id:            r.id,
+    courseId:      r.course_id,
     label:         r.label,
     scopeItems:    (r.scope_items ?? []).map((s: any) => ({
       scopeType: s.scope_type, scopeId: s.scope_id, title: s.title,

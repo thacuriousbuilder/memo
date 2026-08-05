@@ -9,7 +9,8 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
 import { useSession }  from '@/hooks/useSession'
 import { useDashboard, PlanItem, UpcomingExam, WeekPlanItem, EndedAutoPlan, NeedsMaterialsPlan } from '@/hooks/useDashboard'
-import { resolveReminderNoteIds, renewAutoPlan } from '@/hooks/useReminders'
+import { renewAutoPlan } from '@/hooks/useReminders'
+import { buildSessionRoute } from '@/lib/sessionRouting'
 
 if (Platform.OS === 'android') {
   UIManager.setLayoutAnimationEnabledExperimental?.(true)
@@ -48,92 +49,11 @@ function getDaysColor(daysLeft: number): string {
 
 // ─────────────────────────────────────────
 // SHARED: start a plan item
-// Auto items never have scopeItems (scope is resolved live, not stored)
-// — they must branch off reminderMode first, using the already-resolved
-// resolvedScopeType/resolvedScopeId/resolvedTitle instead of scopeItems.
+// Routing itself lives in lib/sessionRouting.ts (buildSessionRoute), shared
+// with the notification-tap cold-start path so the two can't drift.
 // ─────────────────────────────────────────
 async function startPlanItem(item: PlanItem) {
-  if (item.reminderMode === 'auto') {
-    if (!item.resolvedScopeType || !item.resolvedScopeId) {
-      Alert.alert('Nothing to study yet', 'This plan has no resolved topic for today.')
-      return
-    }
-    if (item.sessionType === 'blurt') {
-      router.replace({
-        pathname: '/blurt/[id]',
-        params: {
-          id: item.courseId,
-          scopeType: item.resolvedScopeType,
-          scopeId: item.resolvedScopeId,
-          title: item.resolvedTitle ?? item.label,
-          reminderId: item.reminderId,
-        },
-      })
-      return
-    }
-    router.push({
-      pathname: '/study/[id]',
-      params: {
-        id: item.resolvedScopeId,
-        mode: item.resolvedScopeType === 'subtopic' ? 'sublesson' : 'lesson',
-        title: item.resolvedTitle ?? item.label,
-        presetCount: String(item.questionCount ?? 5),
-        reminderId: item.reminderId,
-        returnTo: 'home',
-      },
-    })
-    return
-  }
-
-  if (item.sessionType === 'blurt') {
-    const scope = item.scopeItems[0]
-    if (!scope || scope.scopeType === 'folder') {
-      Alert.alert('No materials', 'This reminder isn\'t scoped to a specific topic yet.')
-      return
-    }
-    router.replace({
-      pathname: '/blurt/[id]',
-      params: {
-        id: item.courseId,
-        scopeType: scope.scopeType,
-        scopeId: scope.scopeId,
-        title: item.label,
-        reminderId: item.reminderId,
-      },
-    })
-    return
-  }
-  try {
-    if (item.scopeItems.length === 0) {
-      router.push({
-        pathname: '/study/[id]',
-        params: {
-          id: item.courseId, mode: 'course', title: item.label,
-          presetCount: String(item.questionCount ?? 10),
-          reminderId: item.reminderId,
-          returnTo: 'home',
-        },
-      })
-      return
-    }
-    const noteIds = await resolveReminderNoteIds(item.scopeItems)
-    if (!noteIds.length) {
-      Alert.alert('No materials', 'This reminder\'s materials couldn\'t be found.')
-      return
-    }
-    router.push({
-      pathname: '/study/[id]',
-      params: {
-        id: item.courseId, mode: 'custom', title: item.label,
-        noteIds: JSON.stringify(noteIds),
-        presetCount: String(item.questionCount ?? 10),
-        reminderId: item.reminderId,
-        returnTo: 'home',
-      },
-    })
-  } catch (err: any) {
-    Alert.alert('Error', err.message)
-  }
+  await buildSessionRoute(item)
 }
 // ─────────────────────────────────────────
 // SMART BADGE — marks a card/row as an Auto ("Smart") plan

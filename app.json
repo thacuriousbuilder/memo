@@ -5,6 +5,7 @@
     "version": "1.0.0",
     "scheme": "memo",
     "orientation": "portrait",
+    "icon":"./assets/memoicon1.png",
     "userInterfaceStyle": "dark",
     "plugins": [
       "expo-router",

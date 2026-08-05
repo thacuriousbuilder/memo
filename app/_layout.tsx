@@ -11,6 +11,7 @@ import { supabase } from '@/lib/supabase'
 import { Colors } from '@/constants/theme'
 import { configureGoogleSignIn } from '@/lib/auth'
 import { setupNotificationChannel, getPermissionStatus, registerForPushNotifications } from '@/lib/notifications'
+import { startSessionForReminder } from '@/lib/sessionRouting'
 
 function useProtectedRoute(session: Session | null, loading: boolean) {
   const segments = useSegments()
@@ -60,14 +61,26 @@ export default function RootLayout() {
     })
   }, [session?.user?.id])
 
-  // Tap on a reminder push → open the relevant course.
+  // Tap on a reminder push → jump straight into the quiz/blurt session,
+  // same as tapping "Start" on Home. Falls back to the course page if
+  // reminder_id is missing (e.g. an older payload) or resolution fails
+  // (e.g. the reminder was deleted between send and tap).
   useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data as { course_id?: string }
+    const sub = Notifications.addNotificationResponseReceivedListener(async response => {
+      const data = response.notification.request.content.data as { course_id?: string; reminder_id?: string }
+      const userId = session?.user?.id
+      if (data?.reminder_id && userId) {
+        try {
+          await startSessionForReminder(data.reminder_id, userId)
+          return
+        } catch (err) {
+          console.warn('[notification tap] startSessionForReminder failed:', err)
+        }
+      }
       if (data?.course_id) router.push(`/course/${data.course_id}`)
     })
     return () => sub.remove()
-  }, [router])
+  }, [router, session?.user?.id])
 
   if (loading) return (
     <View style={{
