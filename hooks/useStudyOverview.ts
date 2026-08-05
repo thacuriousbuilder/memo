@@ -51,6 +51,188 @@ export interface Recommendation {
   urgent:      boolean
 }
 
+export interface RankedCandidate extends Recommendation {
+  tier:        1 | 2 | 3
+  sortKey:     number
+  hasHistory:  boolean   // false only for brand-new/never-attempted topics (Tier 2, or a zero-attempt Tier 1) — drives the Auto-plan zero-attempt question-count guardrail
+}
+
+// ─────────────────────────────────────────
+// PER-COURSE RANKING (shared by the Study tab and Auto reminder plans)
+// Three always-on tiers, each independently evaluated every time (no
+// empty-list-only fallback):
+//   Tier 1 — exam-linked within 7 days, regardless of attempt history
+//   Tier 2 — has notes, zero attempts (new course material, or a brand-new
+//            course) — this is what lets newly uploaded content actually
+//            enter an Auto plan's rotation instead of staying invisible
+//   Tier 3 — has attempt history, sorted by staleness (most days since
+//            last touch first)
+// Extracted so Auto plans can resolve a single course's top pick without
+// recomputing every course's structure.
+// ─────────────────────────────────────────
+function daysAgo(dateStr: string): number {
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24))
+}
+function daysUntil(dateStr: string): number {
+  return Math.ceil((new Date(dateStr).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+}
+
+// ── Blend quiz + Blurt "last touched" maps — a topic studied only via
+// Blurt should count as touched, not invisible to ranking ──
+function maxDate(a?: string, b?: string): string | undefined {
+  if (!a) return b
+  if (!b) return a
+  return new Date(a).getTime() >= new Date(b).getTime() ? a : b
+}
+function combineAttemptMaps(quiz: Map<string, string>, blurt: Map<string, string>): Map<string, string> {
+  const combined = new Map<string, string>()
+  for (const id of new Set([...quiz.keys(), ...blurt.keys()])) {
+    const date = maxDate(quiz.get(id), blurt.get(id))
+    if (date) combined.set(id, date)
+  }
+  return combined
+}
+
+export function rankCourseTopics(
+  course: any,
+  courseExams: any[],
+  attemptsByLesson: Map<string, string>,
+  attemptsBySubLesson: Map<string, string>,
+): RankedCandidate[] {
+  const candidates: RankedCandidate[] = []
+
+  const rankUnit = (
+    id: string, scopeType: 'topic' | 'subtopic', title: string, noteIds: string[], lastAttempt: string | undefined
+  ) => {
+    if (noteIds.length === 0) return
+
+    const linkedExam = courseExams.find((e: any) =>
+      (e.material_note_ids ?? []).some((nid: string) => noteIds.includes(nid)))
+    if (linkedExam) {
+      const dUntil = daysUntil(linkedExam.exam_date)
+      if (dUntil <= 7) {
+        candidates.push({
+          id, scopeType, title,
+          courseId: course.id, courseTitle: course.title, courseIcon: course.emoji, courseColor: course.color,
+          reason: dUntil <= 0 ? 'Test today' : dUntil === 1 ? 'Test tomorrow' : `Test in ${dUntil} days`,
+          noteIds, urgent: true, tier: 1, sortKey: dUntil, hasHistory: !!lastAttempt,
+        })
+        return
+      }
+    }
+
+    if (lastAttempt) {
+      const dAgo = daysAgo(lastAttempt)
+      candidates.push({
+        id, scopeType, title,
+        courseId: course.id, courseTitle: course.title, courseIcon: course.emoji, courseColor: course.color,
+        reason: dAgo === 0 ? 'Studied today' : dAgo === 1 ? 'Last studied yesterday' : `Last studied ${dAgo} days ago`,
+        noteIds, urgent: false, tier: 3, sortKey: -dAgo, hasHistory: true,
+      })
+      return
+    }
+
+    candidates.push({
+      id, scopeType, title,
+      courseId: course.id, courseTitle: course.title, courseIcon: course.emoji, courseColor: course.color,
+      reason: 'Not started yet',
+      noteIds, urgent: false, tier: 2, sortKey: 0, hasHistory: false,
+    })
+  }
+
+  for (const section of course.sections ?? []) {
+    for (const lesson of section.lessons ?? []) {
+      const lessonNoteIds = (lesson.notes ?? []).filter((n: any) => n.parsed_text).map((n: any) => n.id)
+      rankUnit(lesson.id, 'topic', lesson.title, lessonNoteIds, attemptsByLesson.get(lesson.id))
+
+      for (const sub of lesson.sub_lessons ?? []) {
+        const subNoteIds = (sub.notes ?? []).filter((n: any) => n.parsed_text).map((n: any) => n.id)
+        rankUnit(sub.id, 'subtopic', sub.title, subNoteIds, attemptsBySubLesson.get(sub.id))
+      }
+    }
+  }
+
+  return candidates
+}
+
+// ─────────────────────────────────────────
+// SCOPED RANKING FOR ONE COURSE (used by Auto reminder plans to resolve
+// "what should today's session cover" without pulling every course's
+// structure the way the Study tab's fetchOverview does). Returns [] when
+// the course has zero parsed notes anywhere — callers should treat that
+// as a distinct "nothing to study yet" state, not an error.
+// ─────────────────────────────────────────
+export async function rankTopicsForCourse(courseId: string, userId: string): Promise<RankedCandidate[]> {
+  const { data: course } = await supabase
+    .from('courses')
+    .select(`
+      id, title, emoji, color,
+      sections (
+        lessons (
+          id, title,
+          notes ( id, parsed_text ),
+          sub_lessons (
+            id, title,
+            notes ( id, parsed_text )
+          )
+        )
+      )
+    `)
+    .eq('id', courseId)
+    .single()
+
+  if (!course) return []
+
+  const lessonIds: string[] = []
+  const subLessonIds: string[] = []
+  for (const section of course.sections ?? []) {
+    for (const lesson of section.lessons ?? []) {
+      lessonIds.push(lesson.id)
+      for (const sub of lesson.sub_lessons ?? []) subLessonIds.push(sub.id)
+    }
+  }
+
+  const scopeFilter = [
+    lessonIds.length    ? `lesson_id.in.(${lessonIds.join(',')})`       : null,
+    subLessonIds.length ? `sub_lesson_id.in.(${subLessonIds.join(',')})` : null,
+  ].filter(Boolean).join(',')
+
+  const [examRes, attemptsRes, blurtRes] = await Promise.all([
+    supabase
+      .from('exams')
+      .select('course_id, exam_date, material_note_ids')
+      .eq('user_id', userId)
+      .eq('course_id', courseId)
+      .eq('status', 'upcoming')
+      .gte('exam_date', new Date().toISOString().split('T')[0]),
+    scopeFilter
+      ? supabase.from('quiz_attempts').select('lesson_id, sub_lesson_id, completed_at').eq('user_id', userId).or(scopeFilter).order('completed_at', { ascending: false })
+      : Promise.resolve({ data: [] as any[] }),
+    scopeFilter
+      ? supabase.from('blurt_attempts').select('lesson_id, sub_lesson_id, created_at').eq('user_id', userId).or(scopeFilter).order('created_at', { ascending: true })
+      : Promise.resolve({ data: [] as any[] }),
+  ])
+
+  const attemptsByLesson = new Map<string, string>()
+  const attemptsBySubLesson = new Map<string, string>()
+  ;(attemptsRes.data ?? []).forEach((a: any) => {
+    if (a.lesson_id && !attemptsByLesson.has(a.lesson_id)) attemptsByLesson.set(a.lesson_id, a.completed_at)
+    if (a.sub_lesson_id && !attemptsBySubLesson.has(a.sub_lesson_id)) attemptsBySubLesson.set(a.sub_lesson_id, a.completed_at)
+  })
+
+  const blurtByLesson = new Map<string, string>()
+  const blurtBySubLesson = new Map<string, string>()
+  ;(blurtRes.data ?? []).forEach((r: any) => {
+    if (r.lesson_id) blurtByLesson.set(r.lesson_id, r.created_at)
+    if (r.sub_lesson_id) blurtBySubLesson.set(r.sub_lesson_id, r.created_at)
+  })
+
+  const combinedByLesson    = combineAttemptMaps(attemptsByLesson, blurtByLesson)
+  const combinedBySubLesson = combineAttemptMaps(attemptsBySubLesson, blurtBySubLesson)
+
+  return rankCourseTopics(course, examRes.data ?? [], combinedByLesson, combinedBySubLesson)
+}
+
 // ─────────────────────────────────────────
 // HOOK
 // ─────────────────────────────────────────
@@ -218,72 +400,23 @@ export function useStudyOverview(userId: string | null) {
         if (a.sub_lesson_id && !attemptsBySubLesson.has(a.sub_lesson_id)) attemptsBySubLesson.set(a.sub_lesson_id, a.completed_at)
       })
 
-      const daysAgo = (dateStr: string) => Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24))
-      const daysUntil = (dateStr: string) => Math.ceil((new Date(dateStr).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+      // ── Blend Blurt into the same "last touched" signal — a topic
+      // studied only via Blurt should count as touched, not invisible ──
+      const blurtByLesson = new Map<string, string>()
+      const blurtBySubLesson = new Map<string, string>()
+      ;(blurtRows ?? []).forEach((r: any) => {
+        if (r.lesson_id) blurtByLesson.set(r.lesson_id, r.created_at)      // blurtRows is ascending, so last write wins = most recent
+        if (r.sub_lesson_id) blurtBySubLesson.set(r.sub_lesson_id, r.created_at)
+      })
 
-      const candidates: (Recommendation & { sortKey: number; tier: 1 | 2 })[] = []
+      const combinedAttemptsByLesson    = combineAttemptMaps(attemptsByLesson, blurtByLesson)
+      const combinedAttemptsBySubLesson = combineAttemptMaps(attemptsBySubLesson, blurtBySubLesson)
+
+      const candidates: RankedCandidate[] = []
 
       for (const course of coursesData ?? []) {
         const courseExams = (examRows ?? []).filter((e: any) => e.course_id === course.id)
-
-        for (const section of course.sections ?? []) {
-          for (const lesson of section.lessons ?? []) {
-            const lessonNoteIds = (lesson.notes ?? []).filter((n: any) => n.parsed_text).map((n: any) => n.id)
-            const lastAttempt = attemptsByLesson.get(lesson.id)
-
-            if (lessonNoteIds.length > 0 && lastAttempt) {
-              const linkedExam = courseExams.find((e: any) =>
-                (e.material_note_ids ?? []).some((id: string) => lessonNoteIds.includes(id)))
-              if (linkedExam) {
-                const dUntil = daysUntil(linkedExam.exam_date)
-                if (dUntil <= 7) {
-                  candidates.push({
-                    id: lesson.id, scopeType: 'topic', title: lesson.title,
-                    courseId: course.id, courseTitle: course.title, courseIcon: course.emoji, courseColor: course.color,
-                    reason: dUntil <= 0 ? 'Test today' : dUntil === 1 ? 'Test tomorrow' : `Test in ${dUntil} days`,
-                    noteIds: lessonNoteIds, urgent: true, tier: 1, sortKey: dUntil,
-                  })
-                  continue
-                }
-              }
-              const dAgo = daysAgo(lastAttempt)
-              candidates.push({
-                id: lesson.id, scopeType: 'topic', title: lesson.title,
-                courseId: course.id, courseTitle: course.title, courseIcon: course.emoji, courseColor: course.color,
-                reason: dAgo === 0 ? 'Studied today' : dAgo === 1 ? 'Last studied yesterday' : `Last studied ${dAgo} days ago`,
-                noteIds: lessonNoteIds, urgent: false, tier: 2, sortKey: -dAgo,
-              })
-            }
-
-            for (const sub of lesson.sub_lessons ?? []) {
-              const subNoteIds = (sub.notes ?? []).filter((n: any) => n.parsed_text).map((n: any) => n.id)
-              const lastSubAttempt = attemptsBySubLesson.get(sub.id)
-              if (subNoteIds.length === 0 || !lastSubAttempt) continue
-
-              const linkedExam = courseExams.find((e: any) =>
-                (e.material_note_ids ?? []).some((id: string) => subNoteIds.includes(id)))
-              if (linkedExam) {
-                const dUntil = daysUntil(linkedExam.exam_date)
-                if (dUntil <= 7) {
-                  candidates.push({
-                    id: sub.id, scopeType: 'subtopic', title: sub.title,
-                    courseId: course.id, courseTitle: course.title, courseIcon: course.emoji, courseColor: course.color,
-                    reason: dUntil <= 0 ? 'Test today' : dUntil === 1 ? 'Test tomorrow' : `Test in ${dUntil} days`,
-                    noteIds: subNoteIds, urgent: true, tier: 1, sortKey: dUntil,
-                  })
-                  continue
-                }
-              }
-              const dAgo = daysAgo(lastSubAttempt)
-              candidates.push({
-                id: sub.id, scopeType: 'subtopic', title: sub.title,
-                courseId: course.id, courseTitle: course.title, courseIcon: course.emoji, courseColor: course.color,
-                reason: dAgo === 0 ? 'Studied today' : dAgo === 1 ? 'Last studied yesterday' : `Last studied ${dAgo} days ago`,
-                noteIds: subNoteIds, urgent: false, tier: 2, sortKey: -dAgo,
-              })
-            }
-          }
-        }
+        candidates.push(...rankCourseTopics(course, courseExams, combinedAttemptsByLesson, combinedAttemptsBySubLesson))
       }
 
       candidates.sort((a, b) => a.tier - b.tier || a.sortKey - b.sortKey)

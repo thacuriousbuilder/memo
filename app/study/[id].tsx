@@ -477,6 +477,8 @@ export default function StudySessionScreen() {
     title:    string
     noteIds?: string
     presetCount?: string
+    reminderId?:  string
+    returnTo?:    string
   }>()
 
   const { user }  = useSession()
@@ -536,6 +538,7 @@ export default function StudySessionScreen() {
         questionCount: total,
         score:         correct,
         answers,
+        reminderId:    params.reminderId ?? null,
       })
 
       router.replace({
@@ -549,6 +552,8 @@ export default function StudySessionScreen() {
           mode,
           scopeId:   id,
           answers:   JSON.stringify(answers),
+          returnTo:    params.returnTo ?? '',
+          reminderId:  params.reminderId ?? '',
         },
       })
     } catch (err: any) {

@@ -8,8 +8,8 @@ import { router }      from 'expo-router'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
 import { useSession }  from '@/hooks/useSession'
-import { useDashboard, PlanItem, UpcomingExam, WeekPlanItem } from '@/hooks/useDashboard'
-import { resolveReminderNoteIds } from '@/hooks/useReminders'
+import { useDashboard, PlanItem, UpcomingExam, WeekPlanItem, EndedAutoPlan, NeedsMaterialsPlan } from '@/hooks/useDashboard'
+import { resolveReminderNoteIds, renewAutoPlan } from '@/hooks/useReminders'
 
 if (Platform.OS === 'android') {
   UIManager.setLayoutAnimationEnabledExperimental?.(true)
@@ -48,8 +48,43 @@ function getDaysColor(daysLeft: number): string {
 
 // ─────────────────────────────────────────
 // SHARED: start a plan item
+// Auto items never have scopeItems (scope is resolved live, not stored)
+// — they must branch off reminderMode first, using the already-resolved
+// resolvedScopeType/resolvedScopeId/resolvedTitle instead of scopeItems.
 // ─────────────────────────────────────────
 async function startPlanItem(item: PlanItem) {
+  if (item.reminderMode === 'auto') {
+    if (!item.resolvedScopeType || !item.resolvedScopeId) {
+      Alert.alert('Nothing to study yet', 'This plan has no resolved topic for today.')
+      return
+    }
+    if (item.sessionType === 'blurt') {
+      router.replace({
+        pathname: '/blurt/[id]',
+        params: {
+          id: item.courseId,
+          scopeType: item.resolvedScopeType,
+          scopeId: item.resolvedScopeId,
+          title: item.resolvedTitle ?? item.label,
+          reminderId: item.reminderId,
+        },
+      })
+      return
+    }
+    router.push({
+      pathname: '/study/[id]',
+      params: {
+        id: item.resolvedScopeId,
+        mode: item.resolvedScopeType === 'subtopic' ? 'sublesson' : 'lesson',
+        title: item.resolvedTitle ?? item.label,
+        presetCount: String(item.questionCount ?? 5),
+        reminderId: item.reminderId,
+        returnTo: 'home',
+      },
+    })
+    return
+  }
+
   if (item.sessionType === 'blurt') {
     const scope = item.scopeItems[0]
     if (!scope || scope.scopeType === 'folder') {
@@ -63,6 +98,7 @@ async function startPlanItem(item: PlanItem) {
         scopeType: scope.scopeType,
         scopeId: scope.scopeId,
         title: item.label,
+        reminderId: item.reminderId,
       },
     })
     return
@@ -74,6 +110,8 @@ async function startPlanItem(item: PlanItem) {
         params: {
           id: item.courseId, mode: 'course', title: item.label,
           presetCount: String(item.questionCount ?? 10),
+          reminderId: item.reminderId,
+          returnTo: 'home',
         },
       })
       return
@@ -89,12 +127,26 @@ async function startPlanItem(item: PlanItem) {
         id: item.courseId, mode: 'custom', title: item.label,
         noteIds: JSON.stringify(noteIds),
         presetCount: String(item.questionCount ?? 10),
+        reminderId: item.reminderId,
+        returnTo: 'home',
       },
     })
   } catch (err: any) {
     Alert.alert('Error', err.message)
   }
 }
+// ─────────────────────────────────────────
+// SMART BADGE — marks a card/row as an Auto ("Smart") plan
+// ─────────────────────────────────────────
+function SmartBadge() {
+  return (
+    <View style={styles.smartBadge}>
+      <Ionicons name="sparkles" size={10} color={Colors.primary} />
+      <Text style={styles.smartBadgeText}>Smart</Text>
+    </View>
+  )
+}
+
 // ─────────────────────────────────────────
 // NEXT UP TODAY
 // ─────────────────────────────────────────
@@ -134,8 +186,13 @@ function NextUpCard({ item, laterItems }: { item: PlanItem | null; laterItems: P
             <MaterialCommunityIcons name={item.courseEmoji as any} size={28} color={item.courseColor ?? Colors.primary} />
           </View>
           <View style={styles.nextInfo}>
-            <Text style={styles.nextTitle}>{item.label}</Text>
-            <Text style={styles.nextDesc}>{item.courseTitle}</Text>
+            <View style={styles.titleRow}>
+              <Text style={styles.nextTitle}>{item.label}</Text>
+              {item.reminderMode === 'auto' && <SmartBadge />}
+            </View>
+            <Text style={styles.nextDesc}>
+              {item.resolvedTitle ? `${item.courseTitle} · ${item.resolvedTitle}` : item.courseTitle}
+            </Text>
           </View>
         </View>
 
@@ -194,11 +251,18 @@ function LaterTodaySection({ items }: { items: PlanItem[] }) {
                 <MaterialCommunityIcons name={item.courseEmoji as any} size={20} color={item.courseColor ?? Colors.primary} />
               </View>
               <View style={styles.rowInfo}>
-                <Text style={[styles.rowTitle, item.done && styles.doneText]}>{item.label}</Text>
+                <View style={styles.titleRow}>
+                  <Text style={[styles.rowTitle, item.done && styles.doneText]}>{item.label}</Text>
+                  {item.reminderMode === 'auto' && <SmartBadge />}
+                </View>
                 {!item.done && (
                   <Text style={styles.rowMeta}>
+                    {item.resolvedTitle ? `${item.resolvedTitle} · ` : ''}
                     {item.time}{item.questionCount ? ` · ${item.questionCount} questions` : ''}
                   </Text>
+                )}
+                {item.done && item.doneVia === 'scope' && (
+                  <Text style={styles.rowMeta}>Already covered today</Text>
                 )}
               </View>
               {item.done
@@ -216,7 +280,7 @@ function LaterTodaySection({ items }: { items: PlanItem[] }) {
 // UPCOMING TESTS
 // ─────────────────────────────────────────
 function UpcomingTestsSection({ exams }: { exams: UpcomingExam[] }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true)
   if (exams.length === 0) return null
 
   const toggle = () => {
@@ -350,6 +414,76 @@ function WeeklyScheduleSection({ items }: { items: WeekPlanItem[] }) {
 }
 
 // ─────────────────────────────────────────
+// ENDED AUTO PLANS — renew nudge
+// ─────────────────────────────────────────
+function EndedAutoPlansSection({ plans, onRenewed }: { plans: EndedAutoPlan[]; onRenewed: () => void }) {
+  if (plans.length === 0) return null
+
+  const renew = async (plan: EndedAutoPlan) => {
+    try {
+      await renewAutoPlan(plan.reminderId, plan.planDurationDays ?? 7)
+      onRenewed()
+    } catch (err: any) {
+      Alert.alert('Error', err.message)
+    }
+  }
+
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>PLAN ENDED</Text>
+      </View>
+      <View style={styles.cardList}>
+        {plans.map(plan => (
+          <View key={plan.reminderId} style={styles.cardRow}>
+            <View style={[styles.rowIconBadge, { backgroundColor: (plan.courseColor ?? Colors.primary) + '22' }]}>
+              <MaterialCommunityIcons name={plan.courseEmoji as any} size={20} color={plan.courseColor ?? Colors.primary} />
+            </View>
+            <View style={styles.rowInfo}>
+              <Text style={styles.rowTitle}>{plan.label}</Text>
+              <Text style={styles.rowMeta}>Your plan for {plan.courseTitle} ended</Text>
+            </View>
+            <TouchableOpacity style={styles.renewBtn} onPress={() => renew(plan)}>
+              <Text style={styles.renewBtnText}>Renew</Text>
+            </TouchableOpacity>
+          </View>
+        ))}
+      </View>
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────
+// NEEDS MATERIALS — non-actionable, not counted toward done/total
+// ─────────────────────────────────────────
+function NeedsMaterialsSection({ plans }: { plans: NeedsMaterialsPlan[] }) {
+  if (plans.length === 0) return null
+
+  return (
+    <View style={styles.section}>
+      <View style={styles.cardList}>
+        {plans.map(plan => (
+          <TouchableOpacity
+            key={plan.reminderId}
+            style={styles.cardRow}
+            onPress={() => router.push(`/course/${plan.courseId}`)}
+          >
+            <View style={[styles.rowIconBadge, { backgroundColor: (plan.courseColor ?? Colors.primary) + '22' }]}>
+              <MaterialCommunityIcons name={plan.courseEmoji as any} size={20} color={plan.courseColor ?? Colors.primary} />
+            </View>
+            <View style={styles.rowInfo}>
+              <Text style={styles.rowTitle}>{plan.label}</Text>
+              <Text style={styles.rowMeta}>Add materials to {plan.courseTitle} to start this plan</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────
 // EMPTY STATE
 // ─────────────────────────────────────────
 function EmptyHome() {
@@ -370,7 +504,7 @@ function EmptyHome() {
 // ─────────────────────────────────────────
 export default function HomeScreen() {
   const { user } = useSession()
-  const { data, loading } = useDashboard(user?.id ?? null)
+  const { data, loading, refetch } = useDashboard(user?.id ?? null)
 
   if (loading) return (
     <View style={[styles.root, styles.center]}>
@@ -382,7 +516,9 @@ export default function HomeScreen() {
     data.next_up ||
     data.later_today.length > 0 ||
     data.upcoming_exams.length > 0 ||
-    data.week_plan.length > 0
+    data.week_plan.length > 0 ||
+    data.ended_auto_plans.length > 0 ||
+    data.needs_materials.length > 0
   )
   return (
     <View style={styles.root}>
@@ -406,6 +542,8 @@ export default function HomeScreen() {
           <>
           <NextUpCard item={data?.next_up ?? null} laterItems={data?.later_today ?? []} />
           <LaterTodaySection items={data?.later_today ?? []} />
+            <EndedAutoPlansSection plans={data?.ended_auto_plans ?? []} onRenewed={refetch} />
+            <NeedsMaterialsSection plans={data?.needs_materials ?? []} />
             <UpcomingTestsSection exams={data?.upcoming_exams ?? []} />
             <WeeklyScheduleSection items={data?.week_plan ?? []} />
           </>
@@ -446,6 +584,13 @@ const styles = StyleSheet.create({
   nextCardHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   nextIconBadge: { width: 52, height: 52, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
   nextInfo: { flex: 1 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexWrap: 'wrap' },
+  smartBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: Colors.primaryMuted, borderRadius: Radius.full,
+    paddingVertical: 2, paddingHorizontal: 7,
+  },
+  smartBadgeText: { fontSize: 10, fontWeight: Typography.bold, color: Colors.primary },
   nextTitle: { fontSize: Typography.xl, fontWeight: Typography.bold, color: Colors.textPrimary },
   nextDesc: { fontSize: Typography.sm, color: Colors.textSecondary, marginTop: 2 },
   nextMeta: { fontSize: Typography.sm, color: Colors.textMuted },
@@ -511,6 +656,11 @@ cardRow: {
   flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
   padding: Spacing.md,
 },
+renewBtn: {
+  backgroundColor: Colors.primary, borderRadius: Radius.full,
+  paddingVertical: Spacing.sm, paddingHorizontal: Spacing.md,
+},
+renewBtnText: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: '#fff' },
 logoRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
 logoBadge: {
   width: 32, height: 32, borderRadius: Radius.md, backgroundColor: Colors.primaryMuted,

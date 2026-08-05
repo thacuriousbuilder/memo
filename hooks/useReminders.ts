@@ -3,12 +3,15 @@
 import { useState, useCallback } from 'react'
 import { useFocusEffect } from 'expo-router'
 import { supabase }       from '@/lib/supabase'
+import { parseLocalDate } from '@/hooks/useExams'
 
 // ─────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────
-export type ScopeType   = 'folder' | 'topic' | 'subtopic'
-export type SessionType = 'quiz' | 'blurt'
+export type ScopeType     = 'folder' | 'topic' | 'subtopic'
+export type SessionType   = 'quiz' | 'blurt'
+export type ReminderMode  = 'manual' | 'auto'
+export type SessionStyle  = 'alternating' | 'combo'
 
 export interface ScopeItem {
   scopeType: ScopeType
@@ -19,12 +22,41 @@ export interface ScopeItem {
 export interface Reminder {
   id:             string
   label:          string
-  scopeItems:     ScopeItem[]   // empty array = All materials
+  scopeItems:     ScopeItem[]   // empty array = All materials (Manual only — Auto never stores scope)
   daysOfWeek:     number[]
   isActive:       boolean
   timeOfDay:      string        // 'HH:MM:SS'
   sessionType:    SessionType
   questionCount:  number | null
+  mode:             ReminderMode
+  planDurationDays: number | null
+  planStartDate:    string | null   // 'YYYY-MM-DD'
+  planEndDate:      string | null   // 'YYYY-MM-DD'
+  autoQuestionLevel: number | null
+  sessionStyle:      SessionStyle | null
+}
+
+const REMINDER_COLUMNS = `
+  id, label, scope_items, days_of_week, is_active, time_of_day, session_type, question_count,
+  reminder_mode, plan_duration_days, plan_start_date, plan_end_date, auto_question_level, auto_session_style
+`
+
+// ─────────────────────────────────────────
+// LOCAL-DAY DATE HELPERS (matches hooks/useExams.ts's parseLocalDate
+// convention — avoid UTC-shift bugs when computing plan_end_date)
+// ─────────────────────────────────────────
+function toDateString(date: Date): string {
+  const mm = (date.getMonth() + 1).toString().padStart(2, '0')
+  const dd = date.getDate().toString().padStart(2, '0')
+  return `${date.getFullYear()}-${mm}-${dd}`
+}
+function todayDateString(): string {
+  return toDateString(new Date())
+}
+function addDays(dateStr: string, days: number): string {
+  const d = parseLocalDate(dateStr)
+  d.setDate(d.getDate() + days)
+  return toDateString(d)
 }
 
 // ─────────────────────────────────────────
@@ -50,7 +82,7 @@ export function useReminders(
 
       const { data, error: err } = await supabase
         .from('reminders')
-        .select('id, label, scope_items, days_of_week, is_active, time_of_day, session_type, question_count')
+        .select(REMINDER_COLUMNS)
         .eq('course_id', courseId)
         .eq('user_id', userId)
         .order('created_at', { ascending: true })
@@ -87,6 +119,12 @@ function mapRow(r: any): Reminder {
     timeOfDay:     r.time_of_day,
     sessionType:   r.session_type,
     questionCount: r.question_count,
+    mode:              r.reminder_mode ?? 'manual',
+    planDurationDays:  r.plan_duration_days ?? null,
+    planStartDate:     r.plan_start_date ?? null,
+    planEndDate:       r.plan_end_date ?? null,
+    autoQuestionLevel: r.auto_question_level ?? null,
+    sessionStyle:      r.auto_session_style ?? null,
   }
 }
 
@@ -124,7 +162,7 @@ export async function createReminder(params: {
 export async function getReminder(reminderId: string): Promise<Reminder | null> {
   const { data, error } = await supabase
     .from('reminders')
-    .select('id, label, scope_items, days_of_week, is_active, time_of_day, session_type, question_count')
+    .select(REMINDER_COLUMNS)
     .eq('id', reminderId)
     .single()
 
@@ -157,6 +195,164 @@ export async function updateReminder(params: {
     })
     .eq('id', params.reminderId)
   if (error) throw error
+}
+
+// ─────────────────────────────────────────
+// CREATE AUTO REMINDER
+// scope_items/session_type/question_count are left empty/null — Auto
+// resolves those live per session instead of storing them.
+// ─────────────────────────────────────────
+export async function createAutoReminder(params: {
+  userId:           string
+  courseId:         string
+  label:            string
+  daysOfWeek:       number[]
+  time:             string
+  planDurationDays: number
+  sessionStyle:     SessionStyle
+}): Promise<void> {
+  const planStartDate = todayDateString()
+  const planEndDate   = addDays(planStartDate, params.planDurationDays - 1)
+
+  const { error } = await supabase
+    .from('reminders')
+    .insert({
+      user_id:             params.userId,
+      course_id:           params.courseId,
+      label:               params.label,
+      scope_items:         [],
+      days_of_week:        params.daysOfWeek,
+      time_of_day:         params.time,
+      session_type:        null,
+      question_count:      null,
+      reminder_mode:       'auto',
+      plan_duration_days:  params.planDurationDays,
+      plan_start_date:     planStartDate,
+      plan_end_date:       planEndDate,
+      auto_question_level: 5,
+      auto_session_style:  params.sessionStyle,
+    })
+  if (error) throw error
+}
+
+// ─────────────────────────────────────────
+// UPDATE AUTO REMINDER
+// Schedule fields (label/days/time) and session style are all editable
+// in place — none of them discard plan progress. Switching mode itself
+// (Auto ↔ Manual) is a separate delete-and-recreate flow, not this.
+// ─────────────────────────────────────────
+export async function updateAutoReminder(params: {
+  reminderId:   string
+  label:        string
+  daysOfWeek:   number[]
+  time:         string
+  sessionStyle: SessionStyle
+}): Promise<void> {
+  const { error } = await supabase
+    .from('reminders')
+    .update({
+      label:              params.label,
+      days_of_week:       params.daysOfWeek,
+      time_of_day:        params.time,
+      auto_session_style: params.sessionStyle,
+    })
+    .eq('id', params.reminderId)
+  if (error) throw error
+}
+
+// ─────────────────────────────────────────
+// RENEW AN ENDED AUTO PLAN
+// auto_question_level is deliberately left untouched — renewing
+// continues the plan rather than restarting it.
+// ─────────────────────────────────────────
+export async function renewAutoPlan(reminderId: string, planDurationDays: number): Promise<void> {
+  const planStartDate = todayDateString()
+  const planEndDate   = addDays(planStartDate, planDurationDays - 1)
+
+  const { error } = await supabase
+    .from('reminders')
+    .update({
+      plan_duration_days: planDurationDays,
+      plan_start_date:    planStartDate,
+      plan_end_date:      planEndDate,
+    })
+    .eq('id', reminderId)
+  if (error) throw error
+}
+
+// ─────────────────────────────────────────
+// BUMP AUTO PLAN LEVEL AFTER A QUIZ ATTEMPT
+// Only advances on a pass, and only if the attempt was actually taken at
+// the plan's current level (a manual retake at a different count
+// shouldn't move the dial). Never steps down on failure.
+// ─────────────────────────────────────────
+const AUTO_LEVEL_CAP = 30
+const AUTO_LEVEL_STEP = 5
+
+export async function bumpAutoPlanLevel(
+  reminderId: string,
+  passed: boolean,
+  attemptQuestionCount: number
+): Promise<void> {
+  if (!passed) return
+
+  const { data: reminder } = await supabase
+    .from('reminders')
+    .select('reminder_mode, auto_question_level')
+    .eq('id', reminderId)
+    .single()
+
+  if (!reminder || reminder.reminder_mode !== 'auto') return
+  if (reminder.auto_question_level !== attemptQuestionCount) return
+
+  const nextLevel = Math.min(reminder.auto_question_level + AUTO_LEVEL_STEP, AUTO_LEVEL_CAP)
+  if (nextLevel === reminder.auto_question_level) return
+
+  const { error } = await supabase
+    .from('reminders')
+    .update({ auto_question_level: nextLevel })
+    .eq('id', reminderId)
+  if (error) throw error
+}
+
+// ─────────────────────────────────────────
+// GUARDRAIL HELPERS
+// ─────────────────────────────────────────
+
+// Overlap heads-up at creation time: does this course already have another
+// active reminder (Auto or Manual)? Also reused (with mode: 'auto') for
+// the exam-creation notice, which specifically checks for an Auto
+// reminder able to react to the new exam.
+export async function hasActiveReminderForCourse(
+  courseId: string,
+  userId: string,
+  opts?: { excludeReminderId?: string; mode?: ReminderMode }
+): Promise<boolean> {
+  let query = supabase
+    .from('reminders')
+    .select('id', { count: 'exact', head: true })
+    .eq('course_id', courseId)
+    .eq('user_id', userId)
+    .eq('is_active', true)
+
+  if (opts?.excludeReminderId) query = query.neq('id', opts.excludeReminderId)
+  if (opts?.mode) query = query.eq('reminder_mode', opts.mode)
+
+  const { count, error } = await query
+  if (error) throw error
+  return (count ?? 0) > 0
+}
+
+// Data-loss confirmation: does this Auto reminder have real progress
+// (ramped past the starting level, or has at least one linked attempt)?
+export async function autoReminderHasProgress(reminderId: string, autoQuestionLevel: number | null): Promise<boolean> {
+  if ((autoQuestionLevel ?? 5) > 5) return true
+
+  const [quizRes, blurtRes] = await Promise.all([
+    supabase.from('quiz_attempts').select('id', { count: 'exact', head: true }).eq('reminder_id', reminderId),
+    supabase.from('blurt_attempts').select('id', { count: 'exact', head: true }).eq('reminder_id', reminderId),
+  ])
+  return (quizRes.count ?? 0) > 0 || (blurtRes.count ?? 0) > 0
 }
 
 // ─────────────────────────────────────────

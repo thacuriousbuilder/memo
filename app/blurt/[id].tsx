@@ -14,6 +14,7 @@ import {
   import { Colors, Spacing, Radius, Typography } from '@/constants/theme'
   import { useSession } from '@/hooks/useSession'
   import { BlurtAPI } from '@/lib/api'
+  import { supabase } from '@/lib/supabase'
   
   type BlurtCount   = 3 | 5 | 10
   type BlurtStep    = 'setup' | 'loading' | 'session'
@@ -113,12 +114,13 @@ import {
   // SESSION SCREEN — one prompt at a time
   // ─────────────────────────────────────────
   function BlurtSession({
-    prompts, scopeType, scopeId, userId, onFinish,
+    prompts, scopeType, scopeId, userId, reminderId, onFinish,
   }: {
     prompts:   BlurtPrompt[]
     scopeType: 'topic' | 'subtopic'
     scopeId:   string
     userId:    string
+    reminderId?: string
     onFinish:  (results: GradeResult[]) => void
   }) {
     const [index, setIndex] = useState(0)
@@ -197,6 +199,19 @@ import {
         })
         setResult(graded)
         setAllResults(prev => [...prev, graded])
+
+        // Best-effort — the grade already succeeded and counts regardless;
+        // this only links it to the Auto/Manual plan that launched it.
+        if (reminderId) {
+          const { error: linkErr } = await supabase
+            .from('blurt_attempts')
+            .update({ reminder_id: reminderId })
+            .eq('id', graded.attempt_id)
+          if (linkErr) {
+            console.error('[BlurtSession] Failed to link reminder_id:', linkErr)
+            Alert.alert('Sync issue', 'Session saved, but couldn\'t sync to your plan today.')
+          }
+        }
       } catch (err: any) {
         Alert.alert('Error', err.message)
       } finally {
@@ -378,6 +393,7 @@ import {
       scopeType: 'topic' | 'subtopic'
       scopeId:   string
       title:     string
+      reminderId?: string
     }>()
     const { user } = useSession()
   
@@ -425,6 +441,7 @@ import {
         scopeType={params.scopeType}
         scopeId={params.scopeId}
         userId={user!.id}
+        reminderId={params.reminderId}
         onFinish={(results) => {
           router.replace({
             pathname: '/blurt/results',

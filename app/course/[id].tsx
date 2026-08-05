@@ -319,7 +319,8 @@ export default function CourseDetailScreen() {
         ) : (
           <View style={{ gap: Spacing.sm }}>
             {reminders.map(reminder => {
-            const mastery = reminder.sessionType === 'quiz' ? reminderMastery(reminder, course) : null
+            const isAuto = reminder.mode === 'auto'
+            const mastery = !isAuto && reminder.sessionType === 'quiz' ? reminderMastery(reminder, course) : null
             const fullyMastered = !!mastery && mastery.totalUnits > 0 && mastery.masteredUnits === mastery.totalUnits
             return (
             <TouchableOpacity
@@ -329,14 +330,19 @@ export default function CourseDetailScreen() {
               activeOpacity={0.7}
             >
               <View style={styles.reminderIcon}>
-                <Ionicons name="notifications" size={18} color={Colors.primary} />
+                <Ionicons name={isAuto ? 'sparkles' : 'notifications'} size={18} color={Colors.primary} />
               </View>
               <View style={styles.examInfo}>
                 <Text style={styles.examTitle}>{reminder.label}</Text>
                 <Text style={styles.examDate}>
                   {formatTime(reminder.timeOfDay)} · {formatDaysOfWeek(reminder.daysOfWeek)}
                 </Text>
-                {mastery && mastery.totalUnits > 0 && (
+                {isAuto ? (
+                  <Text style={styles.masteryText}>
+                    Smart{reminder.planEndDate ? ` · ends ${parseLocalDate(reminder.planEndDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
+                    {reminder.autoQuestionLevel ? ` · Level ${reminder.autoQuestionLevel}` : ''}
+                  </Text>
+                ) : mastery && mastery.totalUnits > 0 && (
                   fullyMastered ? (
                     <TouchableOpacity
                       onPress={() => handleAddMoreMaterial(reminder)}

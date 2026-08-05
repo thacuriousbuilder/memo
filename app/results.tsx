@@ -167,6 +167,8 @@ export default function ResultsScreen() {
     scopeId:  string
     answers:  string
     source?:  string
+    returnTo?: string
+    reminderId?: string
   }>()
 
   const correct   = parseInt(params.correct  ?? '0')
@@ -199,13 +201,15 @@ export default function ResultsScreen() {
         id:    params.scopeId ?? '',
         mode,
         title,
+        reminderId: params.reminderId,
+        returnTo:   params.returnTo,
       },
     })
   }
 
   const handleDone = () => {
     router.dismissAll()
-    router.replace('/(tabs)/study')
+    router.replace(params.returnTo === 'home' ? '/(tabs)' : '/(tabs)/study')
   }
 
   return (

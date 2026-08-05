@@ -2,6 +2,7 @@
 
 import { supabase } from '@/lib/supabase'
 import { QuizAPI } from '@/lib/api'
+import { bumpAutoPlanLevel } from '@/hooks/useReminders'
 // ─────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────
@@ -369,34 +370,6 @@ async function getWrongAnswerQuestions(
 }
 
 // ─────────────────────────────────────────
-// RESOLVE COURSE ID FROM LESSON/SUB-LESSON
-// ─────────────────────────────────────────
-async function resolveCourseId(
-  lessonId:    string | null,
-  subLessonId: string | null
-): Promise<string | null> {
-  if (lessonId) {
-    const { data } = await supabase
-      .from('lessons')
-      .select('sections(course_id)')
-      .eq('id', lessonId)
-      .single()
-    return (data?.sections as any)?.course_id ?? null
-  }
-
-  if (subLessonId) {
-    const { data } = await supabase
-      .from('sub_lessons')
-      .select('lessons(sections(course_id))')
-      .eq('id', subLessonId)
-      .single()
-    return (data?.lessons as any)?.sections?.course_id ?? null
-  }
-
-  return null
-}
-
-// ─────────────────────────────────────────
 // SAVE QUIZ ATTEMPT + UPDATE PROGRESS
 // ─────────────────────────────────────────
 export async function saveQuizAttempt(params: {
@@ -406,6 +379,7 @@ export async function saveQuizAttempt(params: {
   questionCount: number
   score:         number
   answers:       AttemptAnswer[]
+  reminderId?:   string | null
 }): Promise<{ attemptId: string; passed: boolean }> {
   const passed  = params.score / params.questionCount >= 0.8
 
@@ -413,11 +387,17 @@ export async function saveQuizAttempt(params: {
   .includes(params.mode) ? params.id : null
 const subLessonId = params.mode === 'sublesson' ? params.id : null
 
+// course_id is only ever set for course-level modes — quiz_attempts has an
+// "at_most_one_parent" check constraint (lesson_id XOR sub_lesson_id XOR
+// course_id), so it must stay null whenever lessonId/subLessonId is set
+// (previously this fell back to resolveCourseId(lessonId, subLessonId),
+// which populated course_id alongside lesson_id/sub_lesson_id and violated
+// the constraint).
 const courseId = params.mode === 'quick' && params.id === 'all'
   ? null
   : ['course', 'quick', 'custom'].includes(params.mode)
     ? params.id
-    : await resolveCourseId(lessonId, subLessonId)
+    : null
 
   // 1. Save attempt
   const { data: attempt, error: attemptErr } = await supabase
@@ -429,11 +409,21 @@ const courseId = params.mode === 'quick' && params.id === 'all'
       course_id:      courseId,
       question_count: params.questionCount,
       score:          params.score,
+      reminder_id:    params.reminderId ?? null,
     })
     .select('id')
     .single()
 
   if (attemptErr) throw attemptErr
+
+  // Best-effort — an Auto plan's level shouldn't block saving the attempt
+  if (params.reminderId) {
+    try {
+      await bumpAutoPlanLevel(params.reminderId, passed, params.questionCount)
+    } catch (err) {
+      console.error('[saveQuizAttempt] bumpAutoPlanLevel failed:', err)
+    }
+  }
 
   // 2. Save answers
   if (params.answers.length > 0) {

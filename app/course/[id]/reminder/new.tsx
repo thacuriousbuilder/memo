@@ -12,14 +12,22 @@ import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme
 import { useSession } from '@/hooks/useSession'
 import { useCourseOverview, TopicItem } from '@/hooks/useCourseOverview'
 import {
-  ScopeItem, SessionType,
+  ScopeItem, SessionType, ReminderMode, SessionStyle,
   createReminder, updateReminder, getReminder, deleteReminder,
+  createAutoReminder, updateAutoReminder,
+  hasActiveReminderForCourse, autoReminderHasProgress,
 } from '@/hooks/useReminders'
 
 const DAYS = [
   { value: 0, label: 'S' }, { value: 1, label: 'M' }, { value: 2, label: 'T' },
   { value: 3, label: 'W' }, { value: 4, label: 'T' }, { value: 5, label: 'F' },
   { value: 6, label: 'S' },
+]
+
+const DURATION_PRESETS = [
+  { days: 7,  label: '1 week' },
+  { days: 14, label: '2 weeks' },
+  { days: 30, label: '1 month' },
 ]
 
 function toTimeString(date: Date): string {
@@ -73,6 +81,12 @@ export default function NewReminderScreen() {
   const [saving,      setSaving]      = useState(false)
   const [prefilling,  setPrefilling]  = useState(isEditing)
 
+  const [reminderMode,  setReminderMode]  = useState<ReminderMode>('auto')
+  const [initialMode,   setInitialMode]   = useState<ReminderMode>('manual')
+  const [planDurationDays, setPlanDurationDays] = useState(7)
+  const [sessionStyle,  setSessionStyle]  = useState<SessionStyle>('alternating')
+  const [autoQuestionLevel, setAutoQuestionLevel] = useState<number | null>(null)
+
   useEffect(() => {
     if (!reminderId) return
     getReminder(reminderId).then(reminder => {
@@ -85,9 +99,30 @@ export default function NewReminderScreen() {
       setTime(d)
       setSessionType(reminder.sessionType)
       setQuestionCount(reminder.questionCount ?? 5)
+      setReminderMode(reminder.mode)
+      setInitialMode(reminder.mode)
+      setPlanDurationDays(reminder.planDurationDays ?? 7)
+      setSessionStyle(reminder.sessionStyle ?? 'alternating')
+      setAutoQuestionLevel(reminder.autoQuestionLevel)
       setPrefilling(false)
     }).catch(() => setPrefilling(false))
   }, [reminderId])
+
+  // Data-loss confirm wording: specific when there's real progress/config
+  // to lose, generic otherwise. Shared by the delete flow and the
+  // Auto<->Manual mode-switch flow, since mode-switch is delete+recreate.
+  const getDeleteWarning = async (mode: ReminderMode): Promise<string | null> => {
+    if (!reminderId) return null
+    if (mode === 'auto') {
+      const hasProgress = await autoReminderHasProgress(reminderId, autoQuestionLevel)
+      return hasProgress
+        ? `This plan is at Level ${autoQuestionLevel ?? 5}. Deleting it will lose this progress permanently.`
+        : null
+    }
+    return scopeItems.length > 0
+      ? `This will discard your selected study materials checklist.`
+      : null
+  }
 
   const toggleAllMaterials = () => {
     if (sessionType === 'blurt') return
@@ -156,27 +191,57 @@ export default function NewReminderScreen() {
     if (!user || !courseId) return
     if (!label.trim()) { Alert.alert('Required', 'Please enter a label.'); return }
     if (days.size === 0) { Alert.alert('Required', 'Select at least one day.'); return }
-    if (sessionType === 'blurt' && (scopeItems.length === 0 || scopeItems.some(s => s.scopeType === 'folder'))) {
+    if (reminderMode === 'manual' && sessionType === 'blurt' &&
+        (scopeItems.length === 0 || scopeItems.some(s => s.scopeType === 'folder'))) {
       Alert.alert('Select a topic', 'Blurt needs a specific topic or subtopic — pick one below.')
       return
     }
 
     setSaving(true)
     try {
-      const payload = {
-        label: label.trim(),
-        scopeItems,
-        daysOfWeek: Array.from(days),
-        time: toTimeString(time),
-        sessionType,
-        questionCount: sessionType === 'quiz' ? questionCount : null,
-      }
-      if (isEditing && reminderId) {
-        await updateReminder({ reminderId, ...payload })
+      // Overlap heads-up: check BEFORE inserting, since a self-count after
+      // insert would always be >=1 and defeat the check.
+      const hadOtherActiveReminder = !isEditing
+        ? await hasActiveReminderForCourse(courseId, user.id)
+        : false
+
+      if (reminderMode === 'auto') {
+        if (isEditing && reminderId) {
+          await updateAutoReminder({
+            reminderId, label: label.trim(), daysOfWeek: Array.from(days),
+            time: toTimeString(time), sessionStyle,
+          })
+        } else {
+          await createAutoReminder({
+            userId: user.id, courseId, label: label.trim(), daysOfWeek: Array.from(days),
+            time: toTimeString(time), planDurationDays, sessionStyle,
+          })
+        }
       } else {
-        await createReminder({ userId: user.id, courseId, ...payload })
+        const payload = {
+          label: label.trim(),
+          scopeItems,
+          daysOfWeek: Array.from(days),
+          time: toTimeString(time),
+          sessionType,
+          questionCount: sessionType === 'quiz' ? questionCount : null,
+        }
+        if (isEditing && reminderId) {
+          await updateReminder({ reminderId, ...payload })
+        } else {
+          await createReminder({ userId: user.id, courseId, ...payload })
+        }
       }
-      router.replace(`/course/${courseId}`)
+
+      if (hadOtherActiveReminder) {
+        Alert.alert(
+          'Heads up',
+          'You already have a reminder for this course — sessions may occasionally cover the same material.',
+          [{ text: 'Got it', onPress: () => router.replace(`/course/${courseId}`) }]
+        )
+      } else {
+        router.replace(`/course/${courseId}`)
+      }
     } catch (err: any) {
       Alert.alert('Error', err.message)
     } finally {
@@ -184,15 +249,67 @@ export default function NewReminderScreen() {
     }
   }
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!reminderId || !courseId) return
-    Alert.alert('Delete Reminder', `Delete "${label}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-          try { await deleteReminder(reminderId); router.replace(`/course/${courseId}`) }
-          catch (err: any) { Alert.alert('Error', err.message) }
-        }},
-    ])
+    const warning = await getDeleteWarning(reminderMode)
+    Alert.alert(
+      'Delete Reminder',
+      warning ? `${warning} Delete "${label}"?` : `Delete "${label}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: async () => {
+            try { await deleteReminder(reminderId); router.replace(`/course/${courseId}`) }
+            catch (err: any) { Alert.alert('Error', err.message) }
+          }},
+      ]
+    )
+  }
+
+  // Auto<->Manual is delete-and-recreate, not an in-place field change —
+  // schedule fields (label/days/time) carry over, mode-specific config
+  // (scope, or Auto's duration/style) resets to sensible defaults.
+  const handleModeSwitch = async (newMode: ReminderMode) => {
+    if (newMode === reminderMode) return
+    if (!isEditing || !reminderId || !user || !courseId) { setReminderMode(newMode); return }
+
+    const warning = await getDeleteWarning(reminderMode)
+    const modeLabel = newMode === 'auto' ? 'Smart' : 'Custom'
+    Alert.alert(
+      `Switch to ${modeLabel}?`,
+      (warning ? `${warning} ` : '') + `Switching modes deletes this reminder and creates a new one.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Switch', style: 'destructive', onPress: async () => {
+            // Create the replacement FIRST, delete the old one only after
+            // it succeeds — if create fails, the original reminder must
+            // still exist, not be silently lost.
+            try {
+              if (newMode === 'auto') {
+                await createAutoReminder({
+                  userId: user.id, courseId, label: label.trim() || 'Reminder',
+                  daysOfWeek: Array.from(days), time: toTimeString(time),
+                  planDurationDays: 7, sessionStyle: 'alternating',
+                })
+              } else {
+                await createReminder({
+                  userId: user.id, courseId, label: label.trim() || 'Reminder',
+                  scopeItems: [], daysOfWeek: Array.from(days), time: toTimeString(time),
+                  sessionType: 'quiz', questionCount: 5,
+                })
+              }
+            } catch (err: any) {
+              Alert.alert('Error', err.message)
+              return
+            }
+            try {
+              await deleteReminder(reminderId)
+            } catch (err: any) {
+              Alert.alert('Partial error', `The new reminder was created, but the old one couldn't be removed: ${err.message}`)
+            }
+            router.replace(`/course/${courseId}`)
+          }},
+      ]
+    )
   }
 
   if (loading || !course || prefilling) return (
@@ -223,38 +340,88 @@ export default function NewReminderScreen() {
             placeholderTextColor={Colors.textMuted}
           />
 
-          <Text style={styles.fieldLabel}>Study mode</Text>
+          <Text style={styles.fieldLabel}>Session plan</Text>
           <View style={styles.modeRow}>
             <TouchableOpacity
-              style={[styles.modeBtn, sessionType === 'quiz' && styles.modeBtnActive]}
-              onPress={() => setSessionType('quiz')}
+              style={[styles.modeBtn, reminderMode === 'auto' && styles.modeBtnActive]}
+              onPress={() => handleModeSwitch('auto')}
             >
-              <Ionicons name="checkbox-outline" size={16} color={sessionType === 'quiz' ? '#fff' : Colors.textSecondary} />
-              <Text style={[styles.modeBtnText, sessionType === 'quiz' && styles.modeBtnTextActive]}>Quiz</Text>
+              <Ionicons name="sparkles-outline" size={16} color={reminderMode === 'auto' ? '#fff' : Colors.textSecondary} />
+              <Text style={[styles.modeBtnText, reminderMode === 'auto' && styles.modeBtnTextActive]}>Smart</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.modeBtn, sessionType === 'blurt' && styles.modeBtnActive]}
-              onPress={() => setSessionType('blurt')}
+              style={[styles.modeBtn, reminderMode === 'manual' && styles.modeBtnActive]}
+              onPress={() => handleModeSwitch('manual')}
             >
-              <MaterialCommunityIcons name="account-voice" size={16} color={sessionType === 'blurt' ? '#fff' : Colors.textSecondary} />
-              <Text style={[styles.modeBtnText, sessionType === 'blurt' && styles.modeBtnTextActive]}>Blurt</Text>
+              <Ionicons name="options-outline" size={16} color={reminderMode === 'manual' ? '#fff' : Colors.textSecondary} />
+              <Text style={[styles.modeBtnText, reminderMode === 'manual' && styles.modeBtnTextActive]}>Custom</Text>
             </TouchableOpacity>
           </View>
 
-          {sessionType === 'quiz' && (
+          {reminderMode === 'auto' && (
+            <View style={styles.smartBanner}>
+              <Ionicons name="sparkles" size={16} color={Colors.primary} />
+              <Text style={styles.smartBannerText}>
+                MEMO picks the topic, question count, and quiz or blurt for each session automatically.
+              </Text>
+            </View>
+          )}
+
+          {reminderMode === 'manual' && (
             <>
-              <Text style={styles.fieldLabel}>Questions</Text>
-              <View style={styles.stepperRow}>
-                <Text style={styles.stepperHint}>How many to answer</Text>
-                <View style={styles.stepper}>
-                  <TouchableOpacity style={styles.stepperBtn} onPress={() => setQuestionCount(c => Math.max(1, c - 1))}>
-                    <Ionicons name="remove" size={16} color={Colors.textPrimary} />
+              <Text style={styles.fieldLabel}>Study mode</Text>
+              <View style={styles.modeRow}>
+                <TouchableOpacity
+                  style={[styles.modeBtn, sessionType === 'quiz' && styles.modeBtnActive]}
+                  onPress={() => setSessionType('quiz')}
+                >
+                  <Ionicons name="checkbox-outline" size={16} color={sessionType === 'quiz' ? '#fff' : Colors.textSecondary} />
+                  <Text style={[styles.modeBtnText, sessionType === 'quiz' && styles.modeBtnTextActive]}>Quiz</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modeBtn, sessionType === 'blurt' && styles.modeBtnActive]}
+                  onPress={() => setSessionType('blurt')}
+                >
+                  <MaterialCommunityIcons name="account-voice" size={16} color={sessionType === 'blurt' ? '#fff' : Colors.textSecondary} />
+                  <Text style={[styles.modeBtnText, sessionType === 'blurt' && styles.modeBtnTextActive]}>Blurt</Text>
+                </TouchableOpacity>
+              </View>
+
+              {sessionType === 'quiz' && (
+                <>
+                  <Text style={styles.fieldLabel}>Questions</Text>
+                  <View style={styles.stepperRow}>
+                    <Text style={styles.stepperHint}>How many to answer</Text>
+                    <View style={styles.stepper}>
+                      <TouchableOpacity style={styles.stepperBtn} onPress={() => setQuestionCount(c => Math.max(1, c - 1))}>
+                        <Ionicons name="remove" size={16} color={Colors.textPrimary} />
+                      </TouchableOpacity>
+                      <Text style={styles.stepperValue}>{questionCount}</Text>
+                      <TouchableOpacity style={styles.stepperBtn} onPress={() => setQuestionCount(c => Math.min(30, c + 1))}>
+                        <Ionicons name="add" size={16} color={Colors.textPrimary} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </>
+              )}
+            </>
+          )}
+
+          {reminderMode === 'auto' && (
+            <>
+              <Text style={styles.fieldLabel}>Plan duration</Text>
+              <View style={styles.quickDayRow}>
+                {DURATION_PRESETS.map(preset => (
+                  <TouchableOpacity
+                    key={preset.days}
+                    style={[styles.quickDayChip, planDurationDays === preset.days && styles.modeBtnActive]}
+                    onPress={() => setPlanDurationDays(preset.days)}
+                  >
+                    <Text style={[styles.quickDayChipText, planDurationDays === preset.days && styles.modeBtnTextActive]}>
+                      {preset.label}
+                    </Text>
                   </TouchableOpacity>
-                  <Text style={styles.stepperValue}>{questionCount}</Text>
-                  <TouchableOpacity style={styles.stepperBtn} onPress={() => setQuestionCount(c => Math.min(30, c + 1))}>
-                    <Ionicons name="add" size={16} color={Colors.textPrimary} />
-                  </TouchableOpacity>
-                </View>
+                ))}
               </View>
             </>
           )}
@@ -309,39 +476,43 @@ export default function NewReminderScreen() {
               </View>
             )}
 
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.fieldLabel}>Study from</Text>
-            <Text style={styles.sectionSummary}>
-              {scopeItems.length === 0 ? 'All materials' : `${scopeItems.length} selected`}
-            </Text>
-          </View>
-          {sessionType === 'blurt' && (
-            <Text style={styles.scopeHint}>
-              Blurt needs a specific topic or subtopic, whole-course and folder selections aren't supported yet.
-            </Text>
+          {reminderMode === 'manual' && (
+            <>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.fieldLabel}>Study from</Text>
+                <Text style={styles.sectionSummary}>
+                  {scopeItems.length === 0 ? 'All materials' : `${scopeItems.length} selected`}
+                </Text>
+              </View>
+              {sessionType === 'blurt' && (
+                <Text style={styles.scopeHint}>
+                  Blurt needs a specific topic or subtopic, whole-course and folder selections aren't supported yet.
+                </Text>
+              )}
+              <View style={styles.scopeList}>
+                <ScopeRow
+                  icon={<Ionicons name="layers-outline" size={16} color={Colors.primary} />}
+                  label="All materials"
+                  checked={scopeItems.length === 0}
+                  onPress={toggleAllMaterials}
+                  disabled={sessionType === 'blurt'}
+                />
+              {course.folders.map(folder => (
+              <View key={folder.id}>
+                <ScopeRow
+                  icon={<Ionicons name="folder-outline" size={16} color={Colors.primary} />}
+                  label={folder.title}
+                  checked={isScopeChecked(folder.id)}
+                  onPress={() => toggleScopeItem({ scopeType: 'folder', scopeId: folder.id, title: folder.title })}
+                  disabled={sessionType === 'blurt' && !isScopeChecked(folder.id)}
+                />
+                {folder.topics.map(renderTopic)}
+              </View>
+            ))}
+                {course.unorganizedTopics.map(renderTopic)}
+              </View>
+            </>
           )}
-          <View style={styles.scopeList}>
-            <ScopeRow
-              icon={<Ionicons name="layers-outline" size={16} color={Colors.primary} />}
-              label="All materials"
-              checked={scopeItems.length === 0}
-              onPress={toggleAllMaterials}
-              disabled={sessionType === 'blurt'}
-            />
-          {course.folders.map(folder => (
-          <View key={folder.id}>
-            <ScopeRow
-              icon={<Ionicons name="folder-outline" size={16} color={Colors.primary} />}
-              label={folder.title}
-              checked={isScopeChecked(folder.id)}
-              onPress={() => toggleScopeItem({ scopeType: 'folder', scopeId: folder.id, title: folder.title })}
-              disabled={sessionType === 'blurt' && !isScopeChecked(folder.id)}
-            />
-            {folder.topics.map(renderTopic)}
-          </View>
-        ))}
-            {course.unorganizedTopics.map(renderTopic)}
-          </View>
 
           {isEditing && (
             <TouchableOpacity style={styles.deleteRow} onPress={handleDelete}>
@@ -374,6 +545,12 @@ const styles = StyleSheet.create({
   fieldLabel: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textPrimary, marginTop: Spacing.lg, marginBottom: Spacing.xs },
   sectionSummary: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: Spacing.lg },
   scopeHint: { fontSize: Typography.xs, color: Colors.warning, marginBottom: Spacing.xs },
+  smartBanner: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm,
+    backgroundColor: Colors.primaryMuted, borderRadius: Radius.lg,
+    padding: Spacing.md, marginTop: Spacing.sm,
+  },
+  smartBannerText: { flex: 1, fontSize: Typography.sm, color: Colors.primary, lineHeight: 19 },
   scopeList: { ...CardBase, overflow: 'hidden', padding: 0 },
   scopeRow: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,

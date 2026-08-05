@@ -12,6 +12,7 @@ import {
   import { useSession } from '@/hooks/useSession'
   import { useCourseOverview } from '@/hooks/useCourseOverview'
   import { createExam, parseLocalDate } from '@/hooks/useExams'
+  import { hasActiveReminderForCourse } from '@/hooks/useReminders'
   import StudyMaterialsList from '@/components/studyMaterialsList'
   import { useEffect } from 'react'
   import { getExam, updateExam, deleteExam } from '@/hooks/useExams'
@@ -86,10 +87,20 @@ import {
       
           if (isEditing && examId) {
             await updateExam({ examId, ...payload })
+            router.back()
           } else {
+            const hasAutoReminder = await hasActiveReminderForCourse(courseId, user.id, { mode: 'auto' })
             await createExam({ userId: user.id, courseId, ...payload })
+            if (!hasAutoReminder) {
+              Alert.alert(
+                'Heads up',
+                'Your reminders for this course are Custom — they won\'t automatically adjust for this exam. Update the reminder\'s materials yourself, or switch it to Smart.',
+                [{ text: 'Got it', onPress: () => router.back() }]
+              )
+            } else {
+              router.back()
+            }
           }
-          router.back()
         } catch (err: any) {
           Alert.alert('Error', err.message)
         } finally {
