@@ -2,9 +2,9 @@
 
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, Alert, Switch, ActivityIndicator
+  StyleSheet, Alert, Switch, ActivityIndicator, AppState, Linking
 } from 'react-native'
-import { useState }       from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Ionicons }       from '@expo/vector-icons'
 import { router }         from 'expo-router'
 import { signOut }        from '@/lib/supabase'
@@ -12,6 +12,7 @@ import { useSession }     from '@/hooks/useSession'
 import { useDashboard }   from '@/hooks/useDashboard'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
 import { useCourses } from '@/hooks/useCourses'
+import { getPermissionStatus, requestPermission, registerForPushNotifications } from '@/lib/notifications'
 
 // ─────────────────────────────────────────
 // REUSABLE ROW
@@ -75,7 +76,7 @@ function ToggleRow({
           value={value}
           onValueChange={onValueChange}
           trackColor={{ false: Colors.border, true: Colors.primary }}
-          thumbColor={Colors.textPrimary}
+          thumbColor={Colors.answerDefault}
         />
       }
     />
@@ -97,9 +98,44 @@ export default function ProfileScreen() {
   const { data: dashboard } = useDashboard(user?.id ?? null)
 
   const [allNotifs,      setAllNotifs]      = useState(true)
-  const [pushNotifs,     setPushNotifs]     = useState(true)
   const [emailNotifs,    setEmailNotifs]    = useState(true)
   const [studyReminders, setStudyReminders] = useState(true)
+
+  // Push permission reflects real OS state — apps can't self-revoke
+  // notification permission, so this drives UI copy/behavior, not a
+  // freely togglable local flag.
+  const [pushStatus, setPushStatus] = useState<'granted' | 'denied' | 'undetermined'>('undetermined')
+
+  const refreshPushStatus = useCallback(async () => {
+    const status = await getPermissionStatus()
+    setPushStatus(status as 'granted' | 'denied' | 'undetermined')
+  }, [])
+
+  useEffect(() => {
+    refreshPushStatus()
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshPushStatus()
+    })
+    return () => sub.remove()
+  }, [refreshPushStatus])
+
+  const handlePushToggle = async () => {
+    if (pushStatus !== 'undetermined') {
+      // Already decided at the OS level (granted or denied) — the app
+      // can't flip it back, only the Settings app can.
+      Linking.openSettings()
+      return
+    }
+    const granted = await requestPermission()
+    if (granted && user) await registerForPushNotifications(user.id)
+    refreshPushStatus()
+  }
+
+  const pushSubtitle = pushStatus === 'denied'
+    ? 'Disabled in system Settings — tap to open'
+    : pushStatus === 'granted'
+    ? 'Manage in system Settings'
+    : 'Get notified on your device'
 
   // ── Derived display values ──
   const fullName = profile?.full_name ?? user?.email?.split('@')[0] ?? 'User'
@@ -138,7 +174,6 @@ export default function ProfileScreen() {
   const handleAllNotifs = (val: boolean) => {
     setAllNotifs(val)
     if (!val) {
-      setPushNotifs(false)
       setEmailNotifs(false)
       setStudyReminders(false)
     }
@@ -207,9 +242,9 @@ export default function ProfileScreen() {
         <ToggleRow
           icon="phone-portrait-outline"
           title="Push Notifications"
-          subtitle="Get notified on your device"
-          value={pushNotifs}
-          onValueChange={setPushNotifs}
+          subtitle={pushSubtitle}
+          value={pushStatus === 'granted'}
+          onValueChange={handlePushToggle}
         />
         <ToggleRow
           icon="mail-outline"

@@ -17,6 +17,7 @@ import {
   createAutoReminder, updateAutoReminder,
   hasActiveReminderForCourse, autoReminderHasProgress,
 } from '@/hooks/useReminders'
+import { requestPermission, registerForPushNotifications } from '@/lib/notifications'
 
 const DAYS = [
   { value: 0, label: 'S' }, { value: 1, label: 'M' }, { value: 2, label: 'T' },
@@ -230,6 +231,17 @@ export default function NewReminderScreen() {
           await updateReminder({ reminderId, ...payload })
         } else {
           await createReminder({ userId: user.id, courseId, ...payload })
+        }
+      }
+
+      // Lazily ask for notification permission on first-ever reminder
+      // creation, in context — never blocks the save if it fails.
+      if (!isEditing) {
+        try {
+          const granted = await requestPermission()
+          if (granted) await registerForPushNotifications(user.id)
+        } catch (err) {
+          console.warn('[handleSave] notification registration failed:', err)
         }
       }
 

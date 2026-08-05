@@ -28,7 +28,16 @@
         {
           "microphonePermission": "Allow Memo to access your microphone so you can record voice answers for Blurt sessions."
         }
-      ]
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/memoicon1.png",
+          "color": "#8B7CF6"
+        }
+      ],
+      "expo-font",
+      "expo-asset"
     ],
     "ios": {
       "supportsTablet": false,

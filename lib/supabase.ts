@@ -146,3 +146,14 @@ export const updatePushToken = async (
     .eq('id', userId)
   if (error) throw error
 }
+
+export const updateTimezone = async (
+  userId: string,
+  timezone: string
+) => {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ timezone })
+    .eq('id', userId)
+  if (error) throw error
+}
