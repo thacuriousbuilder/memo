@@ -178,6 +178,39 @@ export async function updateExam(params: {
   if (error) throw error
 }
 
+export interface DuplicateExam {
+  id:    string
+  title: string
+}
+
+// Same course + same date + same title (case-insensitive, trimmed) — not a
+// hard block since the app intentionally allows multiple exam types on the
+// same course+date (e.g. a quiz and a midterm the same day); this only
+// flags a likely accidental re-entry for the user to confirm or dismiss.
+export async function findDuplicateExam(params: {
+  courseId:       string
+  userId:         string
+  examDate:       string
+  title:          string
+  excludeExamId?: string
+}): Promise<DuplicateExam | null> {
+  let query = supabase
+    .from('exams')
+    .select('id, title')
+    .eq('course_id', params.courseId)
+    .eq('user_id', params.userId)
+    .eq('exam_date', params.examDate)
+
+  if (params.excludeExamId) query = query.neq('id', params.excludeExamId)
+
+  const { data, error } = await query
+  if (error) throw error
+
+  const normalized = params.title.trim().toLowerCase()
+  const match = (data ?? []).find((e: any) => e.title.trim().toLowerCase() === normalized)
+  return match ? { id: match.id, title: match.title } : null
+}
+
 // ─────────────────────────────────────────
 // DELETE EXAM
 // ─────────────────────────────────────────

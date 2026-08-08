@@ -11,7 +11,7 @@ import {
   import { Colors, Spacing, Radius, Typography } from '@/constants/theme'
   import { useSession } from '@/hooks/useSession'
   import { useCourseOverview } from '@/hooks/useCourseOverview'
-  import { createExam, parseLocalDate } from '@/hooks/useExams'
+  import { createExam, parseLocalDate, findDuplicateExam } from '@/hooks/useExams'
   import { hasActiveReminderForCourse } from '@/hooks/useReminders'
   import StudyMaterialsList from '@/components/studyMaterialsList'
   import { useEffect } from 'react'
@@ -84,7 +84,26 @@ import {
             examDate:        toDateString(date),
             materialNoteIds: Array.from(selectedIds),
           }
-      
+
+          const duplicate = await findDuplicateExam({
+            courseId, userId: user.id,
+            examDate: payload.examDate, title: payload.title,
+            excludeExamId: isEditing ? examId : undefined,
+          })
+          if (duplicate) {
+            const proceed = await new Promise<boolean>(resolve => {
+              Alert.alert(
+                'Possible duplicate',
+                `You already have "${duplicate.title}" on ${formatDateDisplay(date)} for this course. Save anyway?`,
+                [
+                  { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                  { text: 'Save Anyway', onPress: () => resolve(true) },
+                ]
+              )
+            })
+            if (!proceed) { setSaving(false); return }
+          }
+
           if (isEditing && examId) {
             await updateExam({ examId, ...payload })
             router.back()
