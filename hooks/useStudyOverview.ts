@@ -420,7 +420,22 @@ export function useStudyOverview(userId: string | null) {
       }
 
       candidates.sort((a, b) => a.tier - b.tier || a.sortKey - b.sortKey)
-      setRecommendations(candidates.slice(0, 5).map(({ tier, sortKey, ...r }) => r))
+
+      // Cap per course so one course's urgent/stale topics can't crowd out
+      // every other course's recommendations — backfill remaining slots
+      // from the next-best candidates of any course.
+      const MAX_PER_COURSE = 2
+      const MAX_RECOMMENDATIONS = 5
+      const perCourseCount = new Map<string, number>()
+      const capped: RankedCandidate[] = []
+      for (const c of candidates) {
+        if (capped.length >= MAX_RECOMMENDATIONS) break
+        const count = perCourseCount.get(c.courseId) ?? 0
+        if (count >= MAX_PER_COURSE) continue
+        perCourseCount.set(c.courseId, count + 1)
+        capped.push(c)
+      }
+      setRecommendations(capped.map(({ tier, sortKey, ...r }) => r))
 
     } catch (err: any) {
       console.error('[StudyOverview] fetchOverview failed:', err)
