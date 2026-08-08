@@ -67,12 +67,13 @@ export interface NeedsMaterialsPlan {
 }
 
 export interface UpcomingExam {
-  id:        string
-  title:     string
-  course:    string
-  emoji:     string
-  exam_date: string
-  days_left: number
+  id:          string
+  title:       string
+  course:      string
+  emoji:       string
+  courseColor: string | null
+  exam_date:   string
+  days_left:   number
 }
 
 export interface RecentSession {
@@ -195,7 +196,7 @@ export function useDashboard(userId: string | null) {
 
         supabase
           .from('exams')
-          .select(`id, title, exam_date, exam_type, courses (title, emoji)`)
+          .select(`id, title, exam_date, exam_type, courses (title, emoji, color)`)
           .eq('user_id', userId)
           .eq('status', 'upcoming')
           .gte('exam_date', new Date().toISOString().split('T')[0])
@@ -423,8 +424,8 @@ export function useDashboard(userId: string | null) {
 
       const upcomingExams: UpcomingExam[] = exams.map((e: any) => ({
         id: e.id, title: e.title, course: e.courses?.title ?? '',
-        emoji: e.courses?.emoji ?? 'book-open-variant', exam_date: e.exam_date,
-        days_left: getDaysLeft(e.exam_date),
+        emoji: e.courses?.emoji ?? 'book-open-variant', courseColor: e.courses?.color ?? null,
+        exam_date: e.exam_date, days_left: getDaysLeft(e.exam_date),
       }))
 
       const recentSessions: RecentSession[] = attempts.slice(0, 10).map((a: any) => ({

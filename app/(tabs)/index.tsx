@@ -224,8 +224,8 @@ function UpcomingTestsSection({ exams }: { exams: UpcomingExam[] }) {
         <View style={styles.cardList}>
           {exams.map((exam) => (
             <View key={exam.id} style={styles.cardRow}>
-              <View style={styles.rowIconBadge}>
-                <MaterialCommunityIcons name={exam.emoji as any} size={20} color={Colors.primary} />
+              <View style={[styles.rowIconBadge, { backgroundColor: (exam.courseColor ?? Colors.primary) + '22' }]}>
+                <MaterialCommunityIcons name={exam.emoji as any} size={20} color={exam.courseColor ?? Colors.primary} />
               </View>
               <View style={styles.rowInfo}>
                 <Text style={styles.rowTitle}>{exam.title}</Text>
