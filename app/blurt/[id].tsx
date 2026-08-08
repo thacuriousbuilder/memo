@@ -4,8 +4,9 @@ import {
     View, Text, TextInput, TouchableOpacity,
     StyleSheet, ActivityIndicator, Alert, ScrollView
   } from 'react-native'
-  import { useState, useEffect } from 'react'
+  import { useState, useEffect, useRef } from 'react'
   import { router, useLocalSearchParams } from 'expo-router'
+  import { useNavigation } from '@react-navigation/native'
   import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
   import {
     useAudioRecorder, useAudioRecorderState, AudioModule, RecordingPresets,
@@ -132,7 +133,7 @@ import {
     const [result, setResult] = useState<GradeResult | null>(null)
     const [allResults, setAllResults] = useState<GradeResult[]>([])
     const [showAnswer, setShowAnswer] = useState(false)
-  
+
     const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY)
     const recorderState  = useAudioRecorderState(audioRecorder)
   
@@ -399,7 +400,35 @@ import {
   
     const [step,    setStep]    = useState<BlurtStep>('setup')
     const [prompts, setPrompts] = useState<BlurtPrompt[]>([])
-  
+
+    // Covers the on-screen close button, iOS swipe-back, and Android
+    // hardware back with a single confirmation — none of them can silently
+    // discard already-answered prompts. Lives on this outer screen (not the
+    // inner BlurtSession) because blurt/results.tsx's "Done" button calls
+    // router.dismissAll(), which can remove this route a second time well
+    // after the initial router.replace to /blurt/results — a ref on a child
+    // component wouldn't reliably survive to see that second removal.
+    // hasFinishedRef is set once the session is legitimately finished and
+    // stays true for the rest of this screen's lifetime so neither removal
+    // ever prompts.
+    const hasFinishedRef = useRef(false)
+    const navigation = useNavigation()
+    useEffect(() => {
+      return navigation.addListener('beforeRemove', (e) => {
+        if (hasFinishedRef.current || step !== 'session') return
+        e.preventDefault()
+        Alert.alert(
+          'Quit Blurt Session',
+          'Your progress on this session will be lost.',
+          [
+            { text: 'Keep Going', style: 'cancel' },
+            { text: 'Quit', style: 'destructive',
+              onPress: () => navigation.dispatch(e.data.action) },
+          ]
+        )
+      })
+    }, [navigation, step])
+
     const handleStart = async (count: BlurtCount) => {
       if (!user) return
       try {
@@ -443,6 +472,7 @@ import {
         userId={user!.id}
         reminderId={params.reminderId}
         onFinish={(results) => {
+          hasFinishedRef.current = true
           router.replace({
             pathname: '/blurt/results',
             params: {

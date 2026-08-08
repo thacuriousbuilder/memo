@@ -11,6 +11,7 @@ import {
   import { COURSE_ICONS, COURSE_COLORS } from '@/constants/courseAppearance'
   import { useSession } from '@/hooks/useSession'
   import { useCourses, updateCourse, deleteCourse } from '@/hooks/useCourses'
+  import DeleteCourseModal from '@/components/modals/deleteCourseModal'
   
   export default function EditCourseScreen() {
     const { id } = useLocalSearchParams<{ id: string }>()
@@ -31,6 +32,7 @@ import {
     const [icon,         setIcon]       = useState(COURSE_ICONS[0])
     const [color,        setColor]      = useState(COURSE_COLORS[0])
     const [saving,       setSaving]     = useState(false)
+    const [confirmVisible, setConfirmVisible] = useState(false)
   
     useEffect(() => {
       if (course) {
@@ -67,24 +69,19 @@ import {
       }
     const handleDelete = () => {
       if (!course) return
-      Alert.alert(
-        'Delete Subject',
-        `Delete "${course.title}"? This will permanently remove all lessons, notes, and questions.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Delete', style: 'destructive',
-            onPress: async () => {
-              try {
-                await deleteCourse(course.id)
-                router.back()
-              } catch (err: any) {
-                Alert.alert('Error', err.message)
-              }
-            },
-          },
-        ]
-      )
+      setConfirmVisible(true)
+    }
+
+    const confirmDelete = async () => {
+      if (!course) return
+      try {
+        await deleteCourse(course.id)
+        setConfirmVisible(false)
+        router.back()
+      } catch (err: any) {
+        setConfirmVisible(false)
+        Alert.alert('Error', err.message)
+      }
     }
   
     if (loading || !course) return (
@@ -179,6 +176,12 @@ import {
             <Text style={styles.deleteText}>Delete subject</Text>
           </TouchableOpacity>
         </ScrollView>
+        <DeleteCourseModal
+          visible={confirmVisible}
+          courseTitle={course?.title ?? ''}
+          onCancel={() => setConfirmVisible(false)}
+          onConfirm={confirmDelete}
+        />
       </View>
     )
   }

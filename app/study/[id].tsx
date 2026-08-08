@@ -4,8 +4,9 @@ import {
   View, Text, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator
 } from 'react-native'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useLocalSearchParams, router } from 'expo-router'
+import { useNavigation } from '@react-navigation/native'
 import Svg, { Circle } from 'react-native-svg'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
@@ -332,15 +333,7 @@ function QuizScreen({
         </View>
         <TouchableOpacity
           style={styles.closeButton}
-          onPress={() => Alert.alert(
-            'Quit Quiz',
-            'Your progress will be lost.',
-            [
-              { text: 'Keep Going', style: 'cancel' },
-              { text: 'Quit', style: 'destructive',
-                onPress: () => router.back() },
-            ]
-          )}
+          onPress={() => router.back()}
         >
           <Ionicons name="close" size={20} color={Colors.textSecondary} />
         </TouchableOpacity>
@@ -489,7 +482,34 @@ export default function StudySessionScreen() {
   const [step, setStep] = useState<QuizStep>(params.presetCount ? 'loading' : 'setup')
   const [questions, setQuestions] = useState<QuizQuestion[]>([])
   const [saving,    setSaving]    = useState(false)
-  
+
+  // Covers the on-screen close button, iOS swipe-back, and Android hardware
+  // back with a single confirmation — none of them can silently discard an
+  // in-progress quiz. Lives on this outer screen (not the inner QuizScreen)
+  // because results.tsx's "Done"/"Retry" buttons call router.dismissAll(),
+  // which can remove this route a second time well after the initial
+  // router.replace to /results — a ref on a child component wouldn't
+  // reliably survive to see that second removal. hasFinishedRef is set once
+  // the quiz is legitimately finished and saved, and stays true for the
+  // rest of this screen's lifetime so neither removal ever prompts.
+  const hasFinishedRef = useRef(false)
+  const navigation = useNavigation()
+  useEffect(() => {
+    return navigation.addListener('beforeRemove', (e) => {
+      if (hasFinishedRef.current || step !== 'quiz') return
+      e.preventDefault()
+      Alert.alert(
+        'Quit Quiz',
+        'Your progress will be lost.',
+        [
+          { text: 'Keep Going', style: 'cancel' },
+          { text: 'Quit', style: 'destructive',
+            onPress: () => navigation.dispatch(e.data.action) },
+        ]
+      )
+    })
+  }, [navigation, step])
+
   useEffect(() => {
     if (params.presetCount && user) {
       handleStart(Number(params.presetCount) as QuizCount)
@@ -529,6 +549,7 @@ export default function StudySessionScreen() {
     answers: AttemptAnswer[]
   ) => {
     if (!user) return
+    hasFinishedRef.current = true
     try {
       setSaving(true)
       const { passed } = await saveQuizAttempt({
@@ -557,6 +578,7 @@ export default function StudySessionScreen() {
         },
       })
     } catch (err: any) {
+      hasFinishedRef.current = false
       Alert.alert('Error saving results', err.message)
     } finally {
       setSaving(false)

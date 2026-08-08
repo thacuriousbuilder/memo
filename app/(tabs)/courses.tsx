@@ -5,10 +5,12 @@ import {
   StyleSheet, ActivityIndicator, Alert, Animated
 } from 'react-native'
 import { router } from 'expo-router'
+import { useState } from 'react'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Swipeable } from 'react-native-gesture-handler'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
 import EmptyState     from '@/components/emptyState'
+import DeleteCourseModal from '@/components/modals/deleteCourseModal'
 import { useSession } from '@/hooks/useSession'
 import {
   useCourses,
@@ -28,27 +30,19 @@ function CourseCard({
   onDeleted: () => void
 }) {
   const examBadge = getExamBadge(course.upcoming_exams)
+  const [confirmVisible, setConfirmVisible] = useState(false)
 
-  const handleDelete = () => {
-    Alert.alert(
-      'Delete Subject',
-      `Delete "${course.title}"? This will permanently remove all lessons, notes, and questions.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text:  'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteCourse(course.id)
-              onDeleted()
-            } catch (err: any) {
-              Alert.alert('Error', err.message)
-            }
-          },
-        },
-      ]
-    )
+  const handleDelete = () => setConfirmVisible(true)
+
+  const confirmDelete = async () => {
+    try {
+      await deleteCourse(course.id)
+      setConfirmVisible(false)
+      onDeleted()
+    } catch (err: any) {
+      setConfirmVisible(false)
+      Alert.alert('Error', err.message)
+    }
   }
 
   const renderRightActions = (
@@ -85,6 +79,7 @@ function CourseCard({
   }
 
   return (
+    <>
     <Swipeable
       renderRightActions={renderRightActions}
       overshootRight={false}
@@ -161,6 +156,13 @@ function CourseCard({
         />
       </TouchableOpacity>
     </Swipeable>
+    <DeleteCourseModal
+      visible={confirmVisible}
+      courseTitle={course.title}
+      onCancel={() => setConfirmVisible(false)}
+      onConfirm={confirmDelete}
+    />
+    </>
   )
 }
 
