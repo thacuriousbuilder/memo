@@ -240,33 +240,89 @@ export function useStudyOverview(userId: string | null) {
   const [recentAttempts, setRecentAttempts] = useState<RecentAttempt[]>([])
   const [recommendations, setRecommendations] = useState<Recommendation[]>([])
   const [loading, setLoading] = useState(true)
+  // True only until the first fetch (success or failure) completes — lets
+  // the screen show a blocking spinner on first load only, and keep
+  // existing content visible during a silent background refetch on refocus.
+  const [initialLoading, setInitialLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
 
   const fetchOverview = useCallback(async () => {
+    // No userId yet almost always means useSession() hasn't resolved this
+    // screen's own session/profile fetch yet (each screen instantiates its
+    // own useSession independently) — a transient startup state, not "no
+    // user." Leave initialLoading true so the spinner keeps showing instead
+    // of flashing the empty state before the real fetch (once userId
+    // arrives) has a chance to run.
     if (!userId) { setLoading(false); return }
     try {
       setLoading(true)
       setError(null)
 
-      // ── Course structure — used both to resolve course info for blurt
-      // attempts (which don't store course_id directly, only
-      // lesson_id/sub_lesson_id) and for the staleness recommendations below ──
-      const { data: coursesData } = await supabase
-        .from('courses')
-        .select(`
-          id, title, emoji, color,
-          sections (
-            lessons (
-              id, title,
-              notes ( id, parsed_text ),
-              sub_lessons (
+      // ── Four independent queries (none depend on each other's result,
+      // only on userId) — fire them all at once instead of one after
+      // another. Capped at 200 rows on the two history tables so a long
+      // history doesn't make every Study-tab focus progressively slower
+      // (matches the capped pattern useDashboard already uses, scaled up
+      // since this feeds cross-course staleness ranking, not just a
+      // 5-item "recent" list). ──
+      const [coursesRes, attemptsRes, blurtRes, examsRes] = await Promise.all([
+        // Course structure — used both to resolve course info for blurt
+        // attempts (which don't store course_id directly, only
+        // lesson_id/sub_lesson_id) and for the staleness recommendations below.
+        supabase
+          .from('courses')
+          .select(`
+            id, title, emoji, color,
+            sections (
+              lessons (
                 id, title,
-                notes ( id, parsed_text )
+                notes ( id, parsed_text ),
+                sub_lessons (
+                  id, title,
+                  notes ( id, parsed_text )
+                )
               )
             )
-          )
-        `)
-        .eq('user_id', userId)
+          `)
+          .eq('user_id', userId),
+
+        // All quiz attempts, joined to course, for recent history.
+        supabase
+          .from('quiz_attempts')
+          .select(`
+            id, score, question_count, completed_at, lesson_id, sub_lesson_id, course_id,
+            courses ( id, title, emoji, color ),
+            lessons ( title ),
+            sub_lessons ( title )
+          `)
+          .eq('user_id', userId)
+          .order('completed_at', { ascending: false })
+          .limit(200),
+
+        // Blurt attempts — one row per graded prompt.
+        supabase
+          .from('blurt_attempts')
+          .select('id, scope_type, lesson_id, sub_lesson_id, rating, created_at')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: true })
+          .limit(200),
+
+        // Recommendations: staleness + upcoming-test proximity.
+        supabase
+          .from('exams')
+          .select('course_id, exam_date, material_note_ids')
+          .eq('user_id', userId)
+          .eq('status', 'upcoming')
+          .gte('exam_date', new Date().toISOString().split('T')[0]),
+      ])
+
+      const { data: coursesData } = coursesRes
+      const { data: attempts, error: attErr } = attemptsRes
+      const { data: blurtRows, error: blurtErr } = blurtRes
+      const { data: examRows } = examsRes
+
+      if (attErr) throw attErr
+      if (blurtErr) throw blurtErr
 
       const lessonInfo    = new Map<string, { courseId: string; courseTitle: string; courseIcon: string; courseColor: string | null; title: string }>()
       const subLessonInfo = new Map<string, { courseId: string; courseTitle: string; courseIcon: string; courseColor: string | null; title: string }>()
@@ -286,20 +342,6 @@ export function useStudyOverview(userId: string | null) {
           }
         }
       }
-
-      // ── All quiz attempts, joined to course, for recent history ──
-      const { data: attempts, error: attErr } = await supabase
-        .from('quiz_attempts')
-        .select(`
-          id, score, question_count, completed_at, lesson_id, sub_lesson_id, course_id,
-          courses ( id, title, emoji, color ),
-          lessons ( title ),
-          sub_lessons ( title )
-        `)
-        .eq('user_id', userId)
-        .order('completed_at', { ascending: false })
-
-      if (attErr) throw attErr
 
       // Quick Quiz ("all courses") and Review Mistakes attempts have no
       // course_id/lesson_id/sub_lesson_id — they span every course, so
@@ -327,14 +369,6 @@ export function useStudyOverview(userId: string | null) {
       // ── Blurt attempts — one row per graded prompt, no session id of
       // its own. Group consecutive attempts on the same topic/subtopic
       // within a short window into a single "session" row for display ──
-      const { data: blurtRows, error: blurtErr } = await supabase
-        .from('blurt_attempts')
-        .select('id, scope_type, lesson_id, sub_lesson_id, rating, created_at')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: true })
-
-      if (blurtErr) throw blurtErr
-
       const SESSION_WINDOW_MS = 15 * 60 * 1000
       type BlurtGroup = { scopeType: 'topic' | 'subtopic'; scopeId: string; ratings: string[]; lastTime: number; lastId: string; ids: string[] }
       const blurtGroups: BlurtGroup[] = []
@@ -385,14 +419,6 @@ export function useStudyOverview(userId: string | null) {
 
       setRecentAttempts(recent)
 
-      // ── Recommendations: staleness + upcoming-test proximity ──
-      const { data: examRows } = await supabase
-        .from('exams')
-        .select('course_id, exam_date, material_note_ids')
-        .eq('user_id', userId)
-        .eq('status', 'upcoming')
-        .gte('exam_date', new Date().toISOString().split('T')[0])
-
       const attemptsByLesson = new Map<string, string>()
       const attemptsBySubLesson = new Map<string, string>()
       ;(attempts ?? []).forEach((a: any) => {
@@ -442,6 +468,7 @@ export function useStudyOverview(userId: string | null) {
       setError(err.message)
     } finally {
       setLoading(false)
+      setInitialLoading(false)
     }
   }, [userId])
 
@@ -449,7 +476,7 @@ export function useStudyOverview(userId: string | null) {
     useCallback(() => { fetchOverview() }, [fetchOverview])
   )
 
-  return { recentAttempts, recommendations, loading, error, refetch: fetchOverview }
+  return { recentAttempts, recommendations, loading, initialLoading, error, refetch: fetchOverview }
 }
 
 // ─────────────────────────────────────────

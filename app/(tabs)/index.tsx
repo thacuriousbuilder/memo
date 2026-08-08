@@ -433,9 +433,9 @@ function EmptyHome() {
 // ─────────────────────────────────────────
 export default function HomeScreen() {
   const { user } = useSession()
-  const { data, loading, refetch } = useDashboard(user?.id ?? null)
+  const { data, initialLoading, refetch } = useDashboard(user?.id ?? null)
 
-  if (loading) return (
+  if (initialLoading) return (
     <View style={[styles.root, styles.center]}>
       <ActivityIndicator color={Colors.primary} size="large" />
     </View>

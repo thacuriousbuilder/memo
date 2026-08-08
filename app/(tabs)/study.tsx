@@ -111,7 +111,7 @@ function QuickQuizCountRow({ count, onPress }: { count: number; onPress: () => v
 
 export default function StudyScreen() {
   const { user } = useSession()
-  const { recommendations, recentAttempts, loading } = useStudyOverview(user?.id ?? null)
+  const { recommendations, recentAttempts, initialLoading } = useStudyOverview(user?.id ?? null)
   const [resolvingId, setResolvingId] = useState<string | null>(null)
   const [startingQuickBlurt, setStartingQuickBlurt] = useState(false)
 
@@ -205,7 +205,7 @@ export default function StudyScreen() {
     }
   }
 
-  if (loading) return (
+  if (initialLoading) return (
     <View style={[styles.root, styles.center]}>
       <ActivityIndicator color={Colors.primary} size="large" />
     </View>

@@ -1,6 +1,6 @@
 
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { useFocusEffect } from 'expo-router'
 import { supabase }       from '@/lib/supabase'
 import { getLatestCorrectnessMap } from '@/hooks/useQuiz'
@@ -104,6 +104,10 @@ export function useCourseOverview(
 ) {
   const [course,  setCourse]  = useState<CourseOverview | null>(null)
   const [loading, setLoading] = useState(true)
+  // True only until the first fetch (success or failure) completes — lets
+  // the screen show a blocking spinner on first load only, and keep
+  // existing content visible during a silent background refetch on refocus.
+  const [initialLoading, setInitialLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
 
   const fetchCourse = useCallback(async () => {
@@ -112,25 +116,47 @@ export function useCourseOverview(
       setLoading(true)
       setError(null)
 
-      const { data, error: err } = await supabase
-        .from('courses')
-        .select(`
-          id, title, emoji, color, description, course_group,
-          notes ( id, file_name, file_type, s3_key, questions (id) ),
-          sections (
-            id, title, is_default, order_index,
-            lessons (
-              id, title, order_index,
-              notes ( id, file_name, file_type, s3_key, questions (id) ),
-              sub_lessons (
+      // Round 1: three independent queries fired together. The course tree
+      // query only needs courseId; user_progress and quiz_attempts only
+      // need userId/courseId — none of them depend on each other's result,
+      // unlike the correctness map below which needs this round's output.
+      // The quiz_attempts query merges what used to be two near-duplicate
+      // queries (one filtered to whole-course attempts, one unfiltered) —
+      // both flatDone and gradePct are now computed from this one result.
+      const [courseRes, progressRes, attemptsRes] = await Promise.all([
+        supabase
+          .from('courses')
+          .select(`
+            id, title, emoji, color, description, course_group,
+            notes ( id, file_name, file_type, s3_key, questions (id) ),
+            sections (
+              id, title, is_default, order_index,
+              lessons (
                 id, title, order_index,
-                notes ( id, file_name, file_type, s3_key, questions (id) )
+                notes ( id, file_name, file_type, s3_key, questions (id) ),
+                sub_lessons (
+                  id, title, order_index,
+                  notes ( id, file_name, file_type, s3_key, questions (id) )
+                )
               )
             )
-          )
-        `)
-        .eq('id', courseId)
-        .single()
+          `)
+          .eq('id', courseId)
+          .single(),
+        supabase
+          .from('user_progress')
+          .select('lesson_id, sub_lesson_id, status')
+          .eq('user_id', userId),
+        supabase
+          .from('quiz_attempts')
+          .select('score, question_count, lesson_id, sub_lesson_id')
+          .eq('course_id', courseId)
+          .eq('user_id', userId),
+      ])
+
+      const { data, error: err } = courseRes
+      const { data: progressRows } = progressRes
+      const { data: allAttempts } = attemptsRes
 
       if (err) throw err
 
@@ -176,12 +202,6 @@ export function useCourseOverview(
         unorganizedTopics.reduce((s, t) =>
           s + t.notes.length + t.subtopics.reduce((s2, sub) => s2 + sub.notes.length, 0), 0)
 
-      // ── Also fetch user_progress for every lesson/sub_lesson to compute progressPct ──
-      const { data: progressRows } = await supabase
-      .from('user_progress')
-      .select('lesson_id, sub_lesson_id, status')
-      .eq('user_id', userId)
-
       const passedLessonIds    = new Set((progressRows ?? []).filter(p => p.status === 'passed' && p.lesson_id).map(p => p.lesson_id))
       const passedSubLessonIds = new Set((progressRows ?? []).filter(p => p.status === 'passed' && p.sub_lesson_id).map(p => p.sub_lesson_id))
 
@@ -215,18 +235,10 @@ export function useCourseOverview(
 
       // ── Flat notes bucket — one unit, done if any whole-course attempt passed ──
       const hasFlatNotes = flatNotes.length > 0
-      let flatDone = false
-      if (hasFlatNotes) {
-        const { data: courseAttempts } = await supabase
-          .from('quiz_attempts')
-          .select('score, question_count')
-          .eq('course_id', courseId)
-          .eq('user_id', userId)
-          .is('lesson_id', null)
-          .is('sub_lesson_id', null)
-
-        flatDone = (courseAttempts ?? []).some(a => a.question_count > 0 && a.score / a.question_count >= 0.8)
-      }
+      const flatDone = hasFlatNotes && (allAttempts ?? []).some(a =>
+        a.lesson_id == null && a.sub_lesson_id == null &&
+        a.question_count > 0 && a.score / a.question_count >= 0.8
+      )
 
       const totalUnits = structuredTotal + (hasFlatNotes ? 1 : 0)
       const doneUnits  = structuredDone + (hasFlatNotes && flatDone ? 1 : 0)
@@ -240,16 +252,10 @@ export function useCourseOverview(
         t.subtopics.reduce((s2, sub) => s2 + sub.notes.reduce((s3, n) => s3 + n.question_count, 0), 0), 0)
 
       // Grade — avg score % across all attempts tied to this course
-      const { data: attempts } = await supabase
-        .from('quiz_attempts')
-        .select('score, question_count')
-        .eq('course_id', courseId)
-        .eq('user_id', userId)
-
       let gradePct: number | null = null
-      if (attempts && attempts.length > 0) {
-        const totalScore = attempts.reduce((s, a) => s + a.score, 0)
-        const totalCount = attempts.reduce((s, a) => s + a.question_count, 0)
+      if (allAttempts && allAttempts.length > 0) {
+        const totalScore = allAttempts.reduce((s, a) => s + a.score, 0)
+        const totalCount = allAttempts.reduce((s, a) => s + a.question_count, 0)
         gradePct = totalCount > 0 ? Math.round((totalScore / totalCount) * 100) : null
       }
       setCourse({
@@ -272,17 +278,18 @@ export function useCourseOverview(
       setError(err.message)
     } finally {
       setLoading(false)
+      setInitialLoading(false)
     }
   }, [courseId, userId])
 
+  // useFocusEffect already fires on initial mount and re-fires whenever
+  // fetchCourse's identity changes (i.e. courseId/userId change), so a
+  // separate useEffect here would just double-fetch on first load.
   useFocusEffect(
     useCallback(() => { fetchCourse() }, [fetchCourse])
   )
-  useEffect(() => {
-    if (courseId && userId) fetchCourse()
-  }, [courseId, userId])
 
-  return { course, loading, error, refetch: fetchCourse }
+  return { course, loading, initialLoading, error, refetch: fetchCourse }
 }
 
 // ─────────────────────────────────────────

@@ -35,10 +35,20 @@ export interface LessonWithMeta extends Lesson {
 export function useCourses(userId: string | null) {
   const [courses, setCourses] = useState<CourseWithMeta[]>([])
   const [loading, setLoading] = useState(true)
+  // True only until the first fetch (success or failure) completes — lets
+  // the screen show a blocking spinner on first load only, and keep
+  // existing content visible during a silent background refetch on refocus.
+  const [initialLoading, setInitialLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
 
   const fetchCourses = useCallback(async () => {
     if (!userId) {
+      // No userId yet almost always means useSession() hasn't resolved this
+      // screen's own session/profile fetch yet (each screen instantiates
+      // its own useSession independently) — a transient startup state, not
+      // "no user." Leave initialLoading true so the spinner keeps showing
+      // instead of flashing the empty state before the real fetch (once
+      // userId arrives) has a chance to run.
       setCourses([])
       setLoading(false)
       return
@@ -47,37 +57,41 @@ export function useCourses(userId: string | null) {
       setLoading(true)
       setError(null)
 
-      // Fetch courses with sections → lessons → sub_lessons
-      const { data: coursesData, error: coursesError } = await supabase
-      .from('courses')
-      .select(`
-        *,
-        notes (id),
-        sections (
-          *,
-          lessons (
+      // Courses and exams are independent of each other (exams only needs
+      // userId) — fetch both in parallel instead of one after another.
+      const [coursesRes, examsRes] = await Promise.all([
+        supabase
+          .from('courses')
+          .select(`
             *,
             notes (id),
-            sub_lessons (
-              id,
-              notes (id)
-            ),
-            user_progress (status)
-          )
-        )
-      `)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
+            sections (
+              *,
+              lessons (
+                *,
+                notes (id),
+                sub_lessons (
+                  id,
+                  notes (id)
+                ),
+                user_progress (status)
+              )
+            )
+          `)
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('exams')
+          .select('*, courses(title, emoji)')
+          .eq('user_id',  userId)
+          .eq('status',   'upcoming')
+          .order('exam_date', { ascending: true }),
+      ])
+
+      const { data: coursesData, error: coursesError } = coursesRes
+      const { data: examsData } = examsRes
 
       if (coursesError) throw coursesError
-
-      // Fetch upcoming exams for all courses
-      const { data: examsData } = await supabase
-        .from('exams')
-        .select('*, courses(title, emoji)')
-        .eq('user_id',  userId)
-        .eq('status',   'upcoming')
-        .order('exam_date', { ascending: true })
 
       const now = new Date()
       now.setHours(0, 0, 0, 0)
@@ -145,6 +159,7 @@ export function useCourses(userId: string | null) {
       setError(err.message)
     } finally {
       setLoading(false)
+      setInitialLoading(false)
     }
   }, [userId])
 
@@ -154,7 +169,7 @@ export function useCourses(userId: string | null) {
     }, [fetchCourses])
   )
 
-  return { courses, loading, error, refetch: fetchCourses }
+  return { courses, loading, initialLoading, error, refetch: fetchCourses }
 }
 
 // ─────────────────────────────────────────

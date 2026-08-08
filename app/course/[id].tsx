@@ -135,7 +135,7 @@ export default function CourseDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { user } = useSession()
 
-  const { course, loading, error, refetch } = useCourseOverview(id ?? null, user?.id ?? null)
+  const { course, initialLoading, error, refetch } = useCourseOverview(id ?? null, user?.id ?? null)
   const { exams, pastExams, refetch: refetchExams } = useExams(id ?? null, user?.id ?? null)
   const [showPastExams, setShowPastExams] = useState(false)
 
@@ -250,15 +250,18 @@ export default function CourseDetailScreen() {
   }
   
 
-  if (loading || !course) return (
+  if (initialLoading) return (
     <View style={[styles.root, styles.center]}>
       <ActivityIndicator color={Colors.primary} size="large" />
     </View>
   )
 
-  if (error) return (
+  // Only reachable once initialLoading is false — if a background refetch
+  // fails, `course` still holds the last good data and stays on-screen
+  // instead of being blanked out here.
+  if (!course) return (
     <View style={[styles.root, styles.center]}>
-      <Text style={styles.errorText}>{error}</Text>
+      <Text style={styles.errorText}>{error ?? 'Something went wrong.'}</Text>
     </View>
   )
 

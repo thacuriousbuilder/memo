@@ -163,9 +163,19 @@ function mapScopeItems(raw: any[]): ScopeItem[] {
 export function useDashboard(userId: string | null) {
   const [data,    setData]    = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  // True only until the first fetch (success or failure) completes — lets
+  // screens show a blocking spinner on first load only, and keep existing
+  // content visible during a silent background refetch on refocus.
+  const [initialLoading, setInitialLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
 
   const fetchDashboard = useCallback(async () => {
+    // No userId yet almost always means useSession() hasn't resolved this
+    // screen's own session/profile fetch yet (each screen instantiates its
+    // own useSession independently) — a transient startup state, not "no
+    // user." Leave initialLoading true so the spinner keeps showing instead
+    // of flashing the empty state before the real fetch (once userId
+    // arrives) has a chance to run.
     if (!userId) { setLoading(false); return }
     try {
       setLoading(true)
@@ -463,10 +473,11 @@ export function useDashboard(userId: string | null) {
       console.error('Dashboard fetch error:', err)
     } finally {
       setLoading(false)
+      setInitialLoading(false)
     }
   }, [userId])
 
   useFocusEffect(useCallback(() => { fetchDashboard() }, [fetchDashboard]))
 
-  return { data, loading, error, refetch: fetchDashboard }
+  return { data, loading, initialLoading, error, refetch: fetchDashboard }
 }
