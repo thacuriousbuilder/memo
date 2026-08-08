@@ -97,10 +97,6 @@ export default function ProfileScreen() {
   const { user, profile }   = useSession()
   const { data: dashboard } = useDashboard(user?.id ?? null)
 
-  const [allNotifs,      setAllNotifs]      = useState(true)
-  const [emailNotifs,    setEmailNotifs]    = useState(true)
-  const [studyReminders, setStudyReminders] = useState(true)
-
   // Push permission reflects real OS state — apps can't self-revoke
   // notification permission, so this drives UI copy/behavior, not a
   // freely togglable local flag.
@@ -171,14 +167,6 @@ export default function ProfileScreen() {
     ])
   }
 
-  const handleAllNotifs = (val: boolean) => {
-    setAllNotifs(val)
-    if (!val) {
-      setEmailNotifs(false)
-      setStudyReminders(false)
-    }
-  }
-
   if (!user) return (
     <View style={[styles.root, styles.center]}>
       <ActivityIndicator color={Colors.primary} />
@@ -202,7 +190,7 @@ export default function ProfileScreen() {
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{initials}</Text>
           </View>
-          <TouchableOpacity style={styles.editAvatarBadge}>
+          <TouchableOpacity style={styles.editAvatarBadge} onPress={() => router.push('/profile/edit')}>
             <Ionicons name="pencil" size={12} color={Colors.textPrimary} />
           </TouchableOpacity>
         </View>
@@ -232,35 +220,14 @@ export default function ProfileScreen() {
       {/* Notifications */}
       <SectionLabel title="NOTIFICATIONS" />
       <View style={styles.card}>
-        {/* <ToggleRow
-          icon="notifications-outline"
-          title="All Notifications"
-          subtitle="Master toggle for all notifications"
-          value={allNotifs}
-          onValueChange={handleAllNotifs}
-        /> */}
         <ToggleRow
           icon="phone-portrait-outline"
           title="Push Notifications"
           subtitle={pushSubtitle}
           value={pushStatus === 'granted'}
           onValueChange={handlePushToggle}
-        />
-        <ToggleRow
-          icon="mail-outline"
-          title="Email Notifications"
-          subtitle="Receive updates via email"
-          value={emailNotifs}
-          onValueChange={setEmailNotifs}
-        />
-        {/* <ToggleRow
-          icon="alarm-outline"
-          title="Study Reminders"
-          subtitle="Daily reminders based on schedule"
-          value={studyReminders}
-          onValueChange={setStudyReminders}
           showDivider={false}
-        /> */}
+        />
       </View>
 
       {/* Account */}
@@ -269,14 +236,14 @@ export default function ProfileScreen() {
         <SettingsRow
           icon="person-outline"
           title="Edit Profile"
-          subtitle="Name, email, avatar"
-          onPress={() => Alert.alert('Coming Soon', 'Profile editing coming soon.')}
+          subtitle="Name"
+          onPress={() => router.push('/profile/edit')}
         />
         <SettingsRow
           icon="lock-closed-outline"
           title="Change Password"
           subtitle="Update your password"
-          onPress={() => Alert.alert('Coming Soon', 'Password change coming soon.')}
+          onPress={() => router.push('/profile/change-password')}
           showDivider={false}
         />
       </View>
@@ -284,27 +251,21 @@ export default function ProfileScreen() {
       {/* Support */}
       <SectionLabel title="SUPPORT" />
       <View style={styles.card}>
-        {/* <SettingsRow
-          icon="help-circle-outline"
-          title="Help Center"
-          subtitle="FAQs and guides"
-          onPress={() => Alert.alert('Coming Soon', 'Help center coming soon.')}
-        /> */}
         <SettingsRow
           icon="mail-outline"
           title="Contact Support"
           subtitle="Get help from our team"
-          onPress={() => Alert.alert('Coming Soon', 'Contact support coming soon.')}
+          onPress={() => Linking.openURL('mailto:thacuriousbuilder@gmail.com')}
         />
         <SettingsRow
           icon="document-text-outline"
           title="Privacy Policy"
-          onPress={() => Alert.alert('Coming Soon', 'Privacy policy coming soon.')}
+          onPress={() => router.push('/profile/legal/privacy')}
         />
         <SettingsRow
           icon="document-text-outline"
           title="Terms of Service"
-          onPress={() => Alert.alert('Coming Soon', 'Terms coming soon.')}
+          onPress={() => router.push('/profile/legal/terms')}
           showDivider={false}
         />
       </View>
@@ -481,7 +442,6 @@ const styles = StyleSheet.create({
     fontWeight: Typography.semibold,
     color:      Colors.error,
   },
-
   // Version
   version: {
     textAlign: 'center',

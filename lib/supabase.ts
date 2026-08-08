@@ -157,3 +157,14 @@ export const updateTimezone = async (
     .eq('id', userId)
   if (error) throw error
 }
+
+export const updateFullName = async (
+  userId: string,
+  fullName: string
+) => {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ full_name: fullName })
+    .eq('id', userId)
+  if (error) throw error
+}

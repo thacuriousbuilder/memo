@@ -10,6 +10,7 @@ interface SessionState {
   user:     User    | null
   profile:  Profile | null
   loading:  boolean
+  refreshProfile: () => Promise<void>
 }
 
 export function useSession(): SessionState {
@@ -58,5 +59,6 @@ export function useSession(): SessionState {
     user:    session?.user ?? null,
     profile,
     loading,
+    refreshProfile: () => session?.user ? fetchProfile(session.user.id) : Promise.resolve(),
   }
 }
