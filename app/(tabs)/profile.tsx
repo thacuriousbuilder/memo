@@ -266,6 +266,12 @@ export default function ProfileScreen() {
           icon="document-text-outline"
           title="Terms of Service"
           onPress={() => router.push('/profile/legal/terms')}
+        />
+        <SettingsRow
+          icon="trash-outline"
+          title="Delete Account"
+          subtitle="Permanently delete your account and data"
+          onPress={() => router.push('/profile/delete-account')}
           showDivider={false}
         />
       </View>

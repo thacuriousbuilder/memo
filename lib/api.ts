@@ -258,6 +258,18 @@ export const ExamsAPI = {
 }
 
 // ─────────────────────────────────────────
+// ACCOUNT
+// ─────────────────────────────────────────
+export const AccountAPI = {
+
+  deleteAccount: (accessToken: string) =>
+    request<{ success: boolean }>('/account/delete', {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }),
+}
+
+// ─────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────
 export interface QuizQuestion {
