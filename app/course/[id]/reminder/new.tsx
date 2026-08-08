@@ -15,7 +15,7 @@ import {
   ScopeItem, SessionType, ReminderMode, SessionStyle,
   createReminder, updateReminder, getReminder, deleteReminder,
   createAutoReminder, updateAutoReminder,
-  hasActiveReminderForCourse, autoReminderHasProgress,
+  hasActiveReminderForCourse, autoReminderHasProgress, findConflictingReminder,
 } from '@/hooks/useReminders'
 import { requestPermission, registerForPushNotifications } from '@/lib/notifications'
 
@@ -200,6 +200,21 @@ export default function NewReminderScreen() {
 
     setSaving(true)
     try {
+      const conflict = await findConflictingReminder({
+        userId: user.id,
+        daysOfWeek: Array.from(days),
+        time: toTimeString(time),
+        excludeReminderId: isEditing ? reminderId : undefined,
+      })
+      if (conflict) {
+        Alert.alert(
+          'Time conflict',
+          `"${conflict.label}" (${conflict.courseTitle}) is already scheduled at ${formatTime12h(time)} on that day. Pick a different time or day.`
+        )
+        setSaving(false)
+        return
+      }
+
       // Overlap heads-up: check BEFORE inserting, since a self-count after
       // insert would always be >=1 and defeat the check.
       const hadOtherActiveReminder = !isEditing
@@ -292,6 +307,20 @@ export default function NewReminderScreen() {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Switch', style: 'destructive', onPress: async () => {
+            const conflict = await findConflictingReminder({
+              userId: user.id,
+              daysOfWeek: Array.from(days),
+              time: toTimeString(time),
+              excludeReminderId: reminderId,
+            })
+            if (conflict) {
+              Alert.alert(
+                'Time conflict',
+                `"${conflict.label}" (${conflict.courseTitle}) is already scheduled at ${formatTime12h(time)} on that day. Pick a different time or day.`
+              )
+              return
+            }
+
             // Create the replacement FIRST, delete the old one only after
             // it succeeds — if create fails, the original reminder must
             // still exist, not be silently lost.

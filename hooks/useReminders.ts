@@ -345,6 +345,42 @@ export async function hasActiveReminderForCourse(
   return (count ?? 0) > 0
 }
 
+export interface ConflictingReminder {
+  id:          string
+  label:       string
+  courseTitle: string
+}
+
+// Global per-user check: does the user already have another active reminder
+// sharing a day-of-week and the exact same time_of_day? There's no stored
+// session duration anywhere, so "conflict" is exact-time equality on a
+// shared day, not real interval overlap.
+export async function findConflictingReminder(params: {
+  userId:             string
+  daysOfWeek:         number[]
+  time:               string   // 'HH:MM:00'
+  excludeReminderId?: string
+}): Promise<ConflictingReminder | null> {
+  let query = supabase
+    .from('reminders')
+    .select('id, label, days_of_week, courses ( title )')
+    .eq('user_id', params.userId)
+    .eq('is_active', true)
+    .eq('time_of_day', params.time)
+
+  if (params.excludeReminderId) query = query.neq('id', params.excludeReminderId)
+
+  const { data, error } = await query
+  if (error) throw error
+
+  const match = (data ?? []).find((r: any) =>
+    (r.days_of_week ?? []).some((d: number) => params.daysOfWeek.includes(d))
+  )
+  if (!match) return null
+
+  return { id: match.id, label: match.label, courseTitle: (match.courses as any)?.title ?? 'another course' }
+}
+
 // Data-loss confirmation: does this Auto reminder have real progress
 // (ramped past the starting level, or has at least one linked attempt)?
 export async function autoReminderHasProgress(reminderId: string, autoQuestionLevel: number | null): Promise<boolean> {
