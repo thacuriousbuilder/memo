@@ -19,6 +19,7 @@ function MasteryStatus({ noteCount, item }: { noteCount: number; item: MasterySt
   if (noteCount === 0) return null
   if (item.questionCount === 0) return <Text style={styles.rowStatus}>Parsed</Text>
   if (item.isMastered) return <Text style={styles.rowStatus}>✓ Mastered</Text>
+  if (item.quizMastered) return <Text style={styles.rowStatusPartial}>{item.masteredCount}/{item.questionCount} mastered · weak recall</Text>
   if (item.masteredCount > 0) return <Text style={styles.rowStatusPartial}>{item.masteredCount}/{item.questionCount} mastered</Text>
   return <Text style={styles.rowStatus}>Parsed</Text>
 }

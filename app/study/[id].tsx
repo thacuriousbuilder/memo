@@ -472,6 +472,9 @@ export default function StudySessionScreen() {
     presetCount?: string
     reminderId?:  string
     returnTo?:    string
+    fromBlurtOverall?:  string
+    fromBlurtPointers?: string
+    retryQuestionIds?:  string
   }>()
 
   const { user }  = useSession()
@@ -479,7 +482,7 @@ export default function StudySessionScreen() {
   const title     = params.title ?? 'Quiz'
   const id        = params.id ?? ''
 
-  const [step, setStep] = useState<QuizStep>(params.presetCount ? 'loading' : 'setup')
+  const [step, setStep] = useState<QuizStep>(params.presetCount || params.retryQuestionIds ? 'loading' : 'setup')
   const [questions, setQuestions] = useState<QuizQuestion[]>([])
   const [saving,    setSaving]    = useState(false)
 
@@ -511,23 +514,28 @@ export default function StudySessionScreen() {
   }, [navigation, step])
 
   useEffect(() => {
-    if (params.presetCount && user) {
+    if (!user) return
+    if (params.retryQuestionIds) {
+      const ids: string[] = JSON.parse(params.retryQuestionIds)
+      handleStart(ids.length as QuizCount, ids)
+    } else if (params.presetCount) {
       handleStart(Number(params.presetCount) as QuizCount)
     }
   }, [user])
-  
-  const handleStart = async (count: QuizCount) => {
+
+  const handleStart = async (count: QuizCount, questionIds?: string[]) => {
     if (!user) return
     try {
       setStep('loading')
       const parsedNoteIds = params.noteIds ? JSON.parse(params.noteIds) : undefined
-  
+
       const qs = await fetchQuestions({
         mode:    mode,
         id,
         count,
         userId:  user.id,
         noteIds: parsedNoteIds,
+        questionIds,
       })
   
       if (!qs.length) {
@@ -575,6 +583,8 @@ export default function StudySessionScreen() {
           answers:   JSON.stringify(answers),
           returnTo:    params.returnTo ?? '',
           reminderId:  params.reminderId ?? '',
+          fromBlurtOverall:  params.fromBlurtOverall ?? '',
+          fromBlurtPointers: params.fromBlurtPointers ?? '',
         },
       })
     } catch (err: any) {

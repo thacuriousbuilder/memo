@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react'
 import { useFocusEffect } from 'expo-router'
 import { supabase }       from '@/lib/supabase'
 import { getLatestCorrectnessMap } from '@/hooks/useQuiz'
+import { getLatestBlurtRatingMap } from '@/hooks/useStudyOverview'
 
 // A topic/subtopic counts as "mastered" once this share of its questions
 // are currently graduated (latest attempt correct). Never-attempted
@@ -28,7 +29,8 @@ export interface MasteryStats {
   questionCount: number
   masteredCount: number
   masteryPct:    number
-  isMastered:    boolean
+  quizMastered:  boolean   // masteryPct >= threshold, quiz-only, before the blurt-recall gate
+  isMastered:    boolean   // quizMastered, downgraded to false if the latest blurt on this scope was rated "weak"
 }
 
 export interface SubtopicItem extends MasteryStats {
@@ -82,19 +84,25 @@ function mapNotes(notes: any[]): NoteRef[] {
   }))
 }
 
-function computeMastery(questionIds: string[], correctness: Map<string, boolean>): MasteryStats {
+function computeMastery(
+  questionIds:    string[],
+  correctness:    Map<string, boolean>,
+  blurtGatedWeak: boolean
+): MasteryStats {
   const questionCount = questionIds.length
   const masteredCount = questionIds.filter(id => correctness.get(id) === true).length
   const masteryPct    = questionCount > 0 ? masteredCount / questionCount : 0
+  const quizMastered  = questionCount > 0 && masteryPct >= MASTERY_THRESHOLD
   return {
     questionCount,
     masteredCount,
     masteryPct,
-    isMastered: questionCount > 0 && masteryPct >= MASTERY_THRESHOLD,
+    quizMastered,
+    isMastered: quizMastered && !blurtGatedWeak,
   }
 }
 
-const EMPTY_MASTERY: MasteryStats = { questionCount: 0, masteredCount: 0, masteryPct: 0, isMastered: false }
+const EMPTY_MASTERY: MasteryStats = { questionCount: 0, masteredCount: 0, masteryPct: 0, quizMastered: false, isMastered: false }
 // ─────────────────────────────────────────
 // HOOK
 // ─────────────────────────────────────────
@@ -215,17 +223,26 @@ export function useCourseOverview(
         ...t.notes.flatMap(n => n.questionIds),
         ...t.subtopics.flatMap(sub => sub.notes.flatMap(n => n.questionIds)),
       ])))
-      const correctness = await getLatestCorrectnessMap(userId, allQuestionIds)
+      const [correctness, blurtRatings] = await Promise.all([
+        getLatestCorrectnessMap(userId, allQuestionIds),
+        getLatestBlurtRatingMap(userId, allTopics.map(t => t.id), allTopics.flatMap(t => t.subtopics.map(sub => sub.id))),
+      ])
 
       for (const topic of allTopics) {
         for (const sub of topic.subtopics) {
-          Object.assign(sub, computeMastery(sub.notes.flatMap(n => n.questionIds), correctness))
+          const subBlurtGatedWeak = blurtRatings.bySubLesson.get(sub.id) === 'weak'
+          Object.assign(sub, computeMastery(sub.notes.flatMap(n => n.questionIds), correctness, subBlurtGatedWeak))
         }
         const topicQuestionIds = [
           ...topic.notes.flatMap(n => n.questionIds),
           ...topic.subtopics.flatMap(sub => sub.notes.flatMap(n => n.questionIds)),
         ]
-        Object.assign(topic, computeMastery(topicQuestionIds, correctness))
+        // A topic can't be "Mastered" while it — or a subtopic pooled
+        // into it — has a known-weak recent blurt.
+        const topicBlurtGatedWeak =
+          blurtRatings.byLesson.get(topic.id) === 'weak' ||
+          topic.subtopics.some(sub => blurtRatings.bySubLesson.get(sub.id) === 'weak')
+        Object.assign(topic, computeMastery(topicQuestionIds, correctness, topicBlurtGatedWeak))
       }
 
       const structuredTotal = allTopics.length + allTopics.reduce((s, t) => s + t.subtopics.length, 0)

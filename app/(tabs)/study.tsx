@@ -1,15 +1,15 @@
 
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, ActivityIndicator, Alert
 } from 'react-native'
-import { router } from 'expo-router'
+import { router, useFocusEffect } from 'expo-router'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
 import { useSession } from '@/hooks/useSession'
-import { useStudyOverview, Recommendation, RecentAttempt, fetchBlurtSessionDetail, pickRandomBlurtScope } from '@/hooks/useStudyOverview'
+import { useStudyOverview, Recommendation, RecentAttempt, fetchBlurtSessionDetail, pickRandomBlurtScope, getReviewCards, ReviewCard } from '@/hooks/useStudyOverview'
 import { fetchQuizAttemptDetail } from '@/hooks/useQuiz'
 
 const BLURT_RATING_META = {
@@ -18,21 +18,61 @@ const BLURT_RATING_META = {
   weak:    { label: 'Weak',    color: Colors.error },
 }
 
+const TIER_META: Record<1 | 2 | 3, { label: string; color: string }> = {
+  1: { label: 'EXAM SOON',   color: Colors.error },
+  2: { label: 'NOT STARTED', color: Colors.primary },
+  3: { label: 'STALE',       color: Colors.warning },
+}
+
 // ─────────────────────────────────────────
 // RECOMMENDATION ROW
 // ─────────────────────────────────────────
+function buildDescriptiveReason(rec: Recommendation): string {
+  if (rec.tier === 1) {
+    return rec.lastScorePct === null
+      ? `${rec.reason} — you haven't started reviewing this yet.`
+      : `${rec.reason} — you last scored ${rec.lastScorePct}%. Worth a refresher.`
+  }
+  if (rec.tier === 2) {
+    return `New material — ${rec.noteIds.length} note${rec.noteIds.length === 1 ? '' : 's'} ready. Try a quick quiz to see where you stand.`
+  }
+  // tier 3
+  return rec.lastScorePct === null
+    ? `${rec.reason} — might be worth a refresher.`
+    : `${rec.reason} — you scored ${rec.lastScorePct}% then. Worth a refresher.`
+}
+
 function RecommendationRow({ rec, onPress }: { rec: Recommendation; onPress: () => void }) {
+  const tierMeta = TIER_META[rec.tier]
+  const blurtColor = rec.blurtRating ? BLURT_RATING_META[rec.blurtRating].color : null
+
   return (
-    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.7}>
-      <View style={[styles.iconBadge, { backgroundColor: (rec.courseColor ?? Colors.primary) + '22' }]}>
-        <MaterialCommunityIcons name={rec.courseIcon as any} size={20} color={rec.courseColor ?? Colors.primary} />
+    <TouchableOpacity style={styles.recCard} onPress={onPress} activeOpacity={0.7}>
+      <View style={styles.recCardHeader}>
+        <View style={[styles.iconBadge, { backgroundColor: (rec.courseColor ?? Colors.primary) + '22' }]}>
+          <MaterialCommunityIcons name={rec.courseIcon as any} size={20} color={rec.courseColor ?? Colors.primary} />
+        </View>
+        <View style={styles.rowInfo}>
+          <Text style={styles.rowTitle} numberOfLines={1}>{rec.title}</Text>
+          <Text style={styles.rowSub} numberOfLines={1}>{rec.courseTitle}</Text>
+        </View>
+        <View style={[styles.tierBadge, { backgroundColor: tierMeta.color + '1A' }]}>
+          <Text style={[styles.tierBadgeText, { color: tierMeta.color }]}>{tierMeta.label}</Text>
+        </View>
       </View>
-      <View style={styles.rowInfo}>
-        <Text style={styles.rowTitle} numberOfLines={1}>{rec.title}</Text>
-        <Text style={styles.rowSub} numberOfLines={1}>{rec.courseTitle}</Text>
+
+      <Text style={styles.recReasonText}>{buildDescriptiveReason(rec)}</Text>
+
+      <View style={styles.recCardFooter}>
+        {blurtColor && (
+          <View style={styles.recBlurtIndicator}>
+            <View style={[styles.blurtDot, { backgroundColor: blurtColor }]} />
+            <Text style={styles.recBlurtLabel}>Blurt: {BLURT_RATING_META[rec.blurtRating!].label}</Text>
+          </View>
+        )}
+        <View style={{ flex: 1 }} />
+        <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
       </View>
-      <Text style={[styles.reasonText, rec.urgent && { color: Colors.error }]}>{rec.reason}</Text>
-      <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
     </TouchableOpacity>
   )
 }
@@ -114,19 +154,37 @@ export default function StudyScreen() {
   const { recommendations, recentAttempts, initialLoading } = useStudyOverview(user?.id ?? null)
   const [resolvingId, setResolvingId] = useState<string | null>(null)
   const [startingQuickBlurt, setStartingQuickBlurt] = useState(false)
+  const [reviewCardCount, setReviewCardCount] = useState<number | null>(null)
+  const [reviewCardsError, setReviewCardsError] = useState(false)
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!user) return
+      setReviewCardsError(false)
+      getReviewCards(user.id)
+        .then((cards: ReviewCard[]) => setReviewCardCount(cards.length))
+        .catch((err: any) => {
+          console.error('[StudyScreen] getReviewCards failed:', err)
+          setReviewCardsError(true)
+        })
+    }, [user?.id])
+  )
 
   const handleRecommendationTap = (rec: Recommendation) => {
     if (!rec.noteIds.length) {
       Alert.alert('No materials', 'This topic\'s materials couldn\'t be found.')
       return
     }
+    // A recommendation is already scoped to exactly one topic/subtopic
+    // (rec.scopeType/rec.id), so label the quiz as such (mode:
+    // 'lesson'/'sublesson') instead of the generic 'custom' — lets the
+    // results screen offer a "Confirm with Blurt" CTA.
     router.push({
       pathname: '/study/[id]',
       params: {
-        id: rec.courseId,
-        mode: 'custom',
+        id: rec.id,
+        mode: rec.scopeType === 'subtopic' ? 'sublesson' : 'lesson',
         title: rec.title,
-        noteIds: JSON.stringify(rec.noteIds),
       },
     })
   }
@@ -228,15 +286,37 @@ export default function StudyScreen() {
               <Text style={styles.emptySubtext}>Take a few quizzes and Memo will start suggesting what to review.</Text>
             </View>
           ) : (
-            <View style={styles.list}>
-              {recommendations.map((rec, idx) => (
-                <View key={rec.id}>
-                  <RecommendationRow rec={rec} onPress={() => handleRecommendationTap(rec)} />
-                  {idx < recommendations.length - 1 && <View style={styles.divider} />}
-                </View>
+            <View style={{ gap: Spacing.sm }}>
+              {recommendations.map(rec => (
+                <RecommendationRow key={rec.id} rec={rec} onPress={() => handleRecommendationTap(rec)} />
               ))}
             </View>
           )}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>REVIEW</Text>
+          <View style={styles.list}>
+            <PracticeRow
+              icon="albums-outline"
+              title="Weak Spots"
+              subtitle={
+                reviewCardsError ? "Couldn't load"
+                  : reviewCardCount === null ? 'Loading...'
+                  : reviewCardCount === 0 ? "You're all caught up"
+                  : `${reviewCardCount} question${reviewCardCount === 1 ? '' : 's'} to review`
+              }
+              onPress={() => router.push('/review')}
+              disabled={reviewCardCount === 0}
+            />
+            <View style={styles.divider} />
+            <PracticeRow
+              icon="refresh-circle-outline"
+              title="Review Mistakes"
+              subtitle="Retry the questions you've gotten wrong"
+              onPress={() => router.push({ pathname: '/study/[id]', params: { id: 'all', mode: 'review', title: 'Review Mistakes' } })}
+            />
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -265,13 +345,6 @@ export default function StudyScreen() {
               onPress={startQuickBlurt}
               loading={startingQuickBlurt}
             />
-            <PracticeRow
-          icon="refresh-circle-outline"
-          title="Review Mistakes"
-          subtitle="Retry the questions you've gotten wrong"
-          onPress={() => router.push({ pathname: '/study/[id]', params: { id: 'all', mode: 'review', title: 'Review Mistakes' } })}
-        />
-        <View style={styles.divider} />
           </View>
         </View>
 
@@ -317,8 +390,18 @@ const styles = StyleSheet.create({
   rowTitle: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.textPrimary },
   rowSub: { fontSize: Typography.xs, color: Colors.textSecondary, marginTop: 1 },
   rowMeta: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 1 },
-  reasonText: { fontSize: Typography.xs, fontWeight: Typography.semibold, color: Colors.textMuted, marginRight: 4 },
   scoreText: { fontSize: Typography.base, fontWeight: Typography.bold, marginRight: 4 },
+  blurtDot: { width: 6, height: 6, borderRadius: 3 },
+  tierBadge: { paddingVertical: 3, paddingHorizontal: Spacing.sm, borderRadius: Radius.full },
+  tierBadgeText: { fontSize: Typography.xs, fontWeight: Typography.bold, letterSpacing: 0.5 },
+
+  // Recommendation cards (standalone, not rows in a shared bordered list)
+  recCard: { ...CardBase, padding: Spacing.md, gap: Spacing.sm },
+  recCardHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  recReasonText: { fontSize: Typography.sm, color: Colors.textSecondary, lineHeight: Typography.sm * 1.4 },
+  recCardFooter: { flexDirection: 'row', alignItems: 'center' },
+  recBlurtIndicator: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  recBlurtLabel: { fontSize: Typography.xs, color: Colors.textMuted },
   emptyBox: { ...CardBase, alignItems: 'center', gap: Spacing.xs, paddingVertical: Spacing.xl },
   emptyText: { fontSize: Typography.base, fontWeight: Typography.medium, color: Colors.textSecondary },
   emptySubtext: { fontSize: Typography.xs, color: Colors.textMuted, textAlign: 'center' },

@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react'
 import { useFocusEffect } from 'expo-router'
 import { supabase } from '@/lib/supabase'
+import { getLatestCorrectnessMap } from '@/hooks/useQuiz'
 
 // ─────────────────────────────────────────
 // TYPES
@@ -39,20 +40,22 @@ export interface BlurtRecentAttempt {
 export type RecentAttempt = QuizRecentAttempt | BlurtRecentAttempt
 
 export interface Recommendation {
-  id:          string
-  scopeType:   'topic' | 'subtopic'
-  title:       string
-  courseId:    string
-  courseTitle: string
-  courseIcon:  string
-  courseColor: string | null
-  reason:      string
-  noteIds:     string[]
-  urgent:      boolean
+  id:           string
+  scopeType:    'topic' | 'subtopic'
+  title:        string
+  courseId:     string
+  courseTitle:  string
+  courseIcon:   string
+  courseColor:  string | null
+  reason:       string
+  noteIds:      string[]
+  urgent:       boolean
+  tier:         1 | 2 | 3
+  lastScorePct: number | null
+  blurtRating:  'strong' | 'partial' | 'weak' | null
 }
 
 export interface RankedCandidate extends Recommendation {
-  tier:        1 | 2 | 3
   sortKey:     number
   hasHistory:  boolean   // false only for brand-new/never-attempted topics (Tier 2, or a zero-attempt Tier 1) — drives the Auto-plan zero-attempt question-count guardrail
 }
@@ -116,6 +119,7 @@ export function rankCourseTopics(
           courseId: course.id, courseTitle: course.title, courseIcon: course.emoji, courseColor: course.color,
           reason: dUntil <= 0 ? 'Test today' : dUntil === 1 ? 'Test tomorrow' : `Test in ${dUntil} days`,
           noteIds, urgent: true, tier: 1, sortKey: dUntil, hasHistory: !!lastAttempt,
+          lastScorePct: null, blurtRating: null,
         })
         return
       }
@@ -128,6 +132,7 @@ export function rankCourseTopics(
         courseId: course.id, courseTitle: course.title, courseIcon: course.emoji, courseColor: course.color,
         reason: dAgo === 0 ? 'Studied today' : dAgo === 1 ? 'Last studied yesterday' : `Last studied ${dAgo} days ago`,
         noteIds, urgent: false, tier: 3, sortKey: -dAgo, hasHistory: true,
+        lastScorePct: null, blurtRating: null,
       })
       return
     }
@@ -137,6 +142,7 @@ export function rankCourseTopics(
       courseId: course.id, courseTitle: course.title, courseIcon: course.emoji, courseColor: course.color,
       reason: 'Not started yet',
       noteIds, urgent: false, tier: 2, sortKey: 0, hasHistory: false,
+      lastScorePct: null, blurtRating: null,
     })
   }
 
@@ -421,18 +427,38 @@ export function useStudyOverview(userId: string | null) {
 
       const attemptsByLesson = new Map<string, string>()
       const attemptsBySubLesson = new Map<string, string>()
+      // Recommendation-card enrichment — last quiz score per scope, purely
+      // additive (attempts is already ordered completed_at desc, same as
+      // the date maps above, so this naturally lands on the latest attempt).
+      const scoresByLesson = new Map<string, number>()
+      const scoresBySubLesson = new Map<string, number>()
       ;(attempts ?? []).forEach((a: any) => {
-        if (a.lesson_id && !attemptsByLesson.has(a.lesson_id)) attemptsByLesson.set(a.lesson_id, a.completed_at)
-        if (a.sub_lesson_id && !attemptsBySubLesson.has(a.sub_lesson_id)) attemptsBySubLesson.set(a.sub_lesson_id, a.completed_at)
+        if (a.lesson_id && !attemptsByLesson.has(a.lesson_id)) {
+          attemptsByLesson.set(a.lesson_id, a.completed_at)
+          if (a.question_count > 0) scoresByLesson.set(a.lesson_id, Math.round((a.score / a.question_count) * 100))
+        }
+        if (a.sub_lesson_id && !attemptsBySubLesson.has(a.sub_lesson_id)) {
+          attemptsBySubLesson.set(a.sub_lesson_id, a.completed_at)
+          if (a.question_count > 0) scoresBySubLesson.set(a.sub_lesson_id, Math.round((a.score / a.question_count) * 100))
+        }
       })
 
       // ── Blend Blurt into the same "last touched" signal — a topic
       // studied only via Blurt should count as touched, not invisible ──
       const blurtByLesson = new Map<string, string>()
       const blurtBySubLesson = new Map<string, string>()
+      // Recommendation-card enrichment — latest Blurt rating per scope.
+      const blurtRatingByLesson = new Map<string, string>()
+      const blurtRatingBySubLesson = new Map<string, string>()
       ;(blurtRows ?? []).forEach((r: any) => {
-        if (r.lesson_id) blurtByLesson.set(r.lesson_id, r.created_at)      // blurtRows is ascending, so last write wins = most recent
-        if (r.sub_lesson_id) blurtBySubLesson.set(r.sub_lesson_id, r.created_at)
+        if (r.lesson_id) {
+          blurtByLesson.set(r.lesson_id, r.created_at)      // blurtRows is ascending, so last write wins = most recent
+          blurtRatingByLesson.set(r.lesson_id, r.rating)
+        }
+        if (r.sub_lesson_id) {
+          blurtBySubLesson.set(r.sub_lesson_id, r.created_at)
+          blurtRatingBySubLesson.set(r.sub_lesson_id, r.rating)
+        }
       })
 
       const combinedAttemptsByLesson    = combineAttemptMaps(attemptsByLesson, blurtByLesson)
@@ -445,13 +471,22 @@ export function useStudyOverview(userId: string | null) {
         candidates.push(...rankCourseTopics(course, courseExams, combinedAttemptsByLesson, combinedAttemptsBySubLesson))
       }
 
+      // Attach the enrichment fields rankCourseTopics doesn't know about
+      // (it's shared with Auto-plan resolution, which never reads them).
+      for (const c of candidates) {
+        const scores  = c.scopeType === 'topic' ? scoresByLesson      : scoresBySubLesson
+        const ratings = c.scopeType === 'topic' ? blurtRatingByLesson : blurtRatingBySubLesson
+        c.lastScorePct = scores.get(c.id) ?? null
+        c.blurtRating  = (ratings.get(c.id) as 'strong' | 'partial' | 'weak' | undefined) ?? null
+      }
+
       candidates.sort((a, b) => a.tier - b.tier || a.sortKey - b.sortKey)
 
       // Cap per course so one course's urgent/stale topics can't crowd out
       // every other course's recommendations — backfill remaining slots
       // from the next-best candidates of any course.
       const MAX_PER_COURSE = 2
-      const MAX_RECOMMENDATIONS = 5
+      const MAX_RECOMMENDATIONS = 3
       const perCourseCount = new Map<string, number>()
       const capped: RankedCandidate[] = []
       for (const c of candidates) {
@@ -461,7 +496,7 @@ export function useStudyOverview(userId: string | null) {
         perCourseCount.set(c.courseId, count + 1)
         capped.push(c)
       }
-      setRecommendations(capped.map(({ tier, sortKey, ...r }) => r))
+      setRecommendations(capped.map(({ sortKey, ...r }) => r))
 
     } catch (err: any) {
       console.error('[StudyOverview] fetchOverview failed:', err)
@@ -555,4 +590,189 @@ export async function pickRandomBlurtScope(
 
   if (!candidates.length) return null
   return candidates[Math.floor(Math.random() * candidates.length)]
+}
+
+// ─────────────────────────────────────────
+// LATEST BLURT RATING PER TOPIC/SUBTOPIC — mastery gate primitive.
+// Blurt has no stable per-prompt identity to pool the way quiz question
+// ids are pooled, so this just keeps the single most recent rating per
+// scope, mirroring getLatestCorrectnessMap's "latest attempt wins" rule.
+// ─────────────────────────────────────────
+export async function getLatestBlurtRatingMap(
+  userId:       string,
+  lessonIds:    string[],
+  subLessonIds: string[]
+): Promise<{ byLesson: Map<string, string>; bySubLesson: Map<string, string> }> {
+  const byLesson    = new Map<string, string>()
+  const bySubLesson = new Map<string, string>()
+
+  const scopeFilter = [
+    lessonIds.length    ? `lesson_id.in.(${lessonIds.join(',')})`       : null,
+    subLessonIds.length ? `sub_lesson_id.in.(${subLessonIds.join(',')})` : null,
+  ].filter(Boolean).join(',')
+
+  if (!scopeFilter) return { byLesson, bySubLesson }
+
+  const { data, error } = await supabase
+    .from('blurt_attempts')
+    .select('lesson_id, sub_lesson_id, rating, created_at')
+    .eq('user_id', userId)
+    .or(scopeFilter)
+    .order('created_at', { ascending: true })
+
+  if (error) throw error
+
+  ;(data ?? []).forEach((r: any) => {
+    if (r.lesson_id) byLesson.set(r.lesson_id, r.rating)          // ascending order → last write = most recent
+    if (r.sub_lesson_id) bySubLesson.set(r.sub_lesson_id, r.rating)
+  })
+
+  return { byLesson, bySubLesson }
+}
+
+// ─────────────────────────────────────────
+// ALREADY BLURTED TODAY — dedup guard for the "Confirm with Blurt" quiz
+// CTA. Blurt's prompt-generation/grading calls are the expensive part of
+// the loop (unlike quiz, which pools pre-generated questions), so this
+// keeps a passed quiz from re-suggesting Blurt on a topic already
+// exercised today.
+// ─────────────────────────────────────────
+export async function hasBlurtedToday(
+  userId:    string,
+  scopeType: 'topic' | 'subtopic',
+  scopeId:   string
+): Promise<boolean> {
+  const startOfToday = new Date()
+  startOfToday.setHours(0, 0, 0, 0)
+
+  const { data, error } = await supabase
+    .from('blurt_attempts')
+    .select('id')
+    .eq(scopeType === 'topic' ? 'lesson_id' : 'sub_lesson_id', scopeId)
+    .eq('user_id', userId)
+    .gte('created_at', startOfToday.toISOString())
+    .limit(1)
+
+  if (error) throw error
+  return (data ?? []).length > 0
+}
+
+// ─────────────────────────────────────────
+// WEAK SPOTS — cross-course, one card per still-missed quiz question, for
+// the passive review deck (app/review.tsx). Blurt deliberately excluded:
+// it has no stable per-prompt content to show as a card's front (a Blurt
+// prompt is regenerated fresh per session, and blurt_attempts only stores
+// rating/feedback/review_pointers, never the prompt text itself), so a
+// Blurt-derived card can't have the same concrete question/explanation
+// shape as a quiz card — tried it, read as weaker filler, removed.
+// ─────────────────────────────────────────
+export interface ReviewCard {
+  id:           string
+  questionText: string
+  explanation:  string | null
+  scopeType:    'topic' | 'subtopic'
+  scopeId:      string
+  topicTitle:   string
+  courseTitle:  string
+  courseIcon:   string
+  courseColor:  string | null
+}
+
+export async function getReviewCards(userId: string): Promise<ReviewCard[]> {
+  const [coursesRes, wrongRes] = await Promise.all([
+    // Course structure — for topic/subtopic titles + course info, same
+    // shape as the lessonInfo/subLessonInfo maps built in fetchOverview.
+    supabase
+      .from('courses')
+      .select(`
+        id, title, emoji, color,
+        sections ( lessons ( id, title, sub_lessons ( id, title ) ) )
+      `)
+      .eq('user_id', userId),
+
+    // Every wrong answer the user has ever given — graduation-checked
+    // below via getLatestCorrectnessMap, same "latest attempt wins" rule
+    // used everywhere else in the app. No count cap: this needs the full
+    // still-missed set, not a quiz-sized sample.
+    supabase
+      .from('attempt_answers')
+      .select('question_id, quiz_attempts!inner(user_id)')
+      .eq('quiz_attempts.user_id', userId)
+      .eq('is_correct', false),
+  ])
+
+  const { data: coursesData } = coursesRes
+  const { data: wrongRows, error: wrongErr } = wrongRes
+  if (wrongErr) throw wrongErr
+
+  const lessonInfo    = new Map<string, { courseId: string; courseTitle: string; courseIcon: string; courseColor: string | null; title: string }>()
+  const subLessonInfo = new Map<string, { courseId: string; courseTitle: string; courseIcon: string; courseColor: string | null; title: string }>()
+  for (const course of coursesData ?? []) {
+    for (const section of course.sections ?? []) {
+      for (const lesson of section.lessons ?? []) {
+        lessonInfo.set(lesson.id, {
+          courseId: course.id, courseTitle: course.title,
+          courseIcon: course.emoji, courseColor: course.color, title: lesson.title,
+        })
+        for (const sub of lesson.sub_lessons ?? []) {
+          subLessonInfo.set(sub.id, {
+            courseId: course.id, courseTitle: course.title,
+            courseIcon: course.emoji, courseColor: course.color, title: sub.title,
+          })
+        }
+      }
+    }
+  }
+
+  // Graduation check — only questions whose MOST RECENT attempt is still
+  // wrong count as missed (a later correct answer clears it immediately).
+  const uniqueWrongIds = [...new Set((wrongRows ?? []).map((r: any) => r.question_id))]
+  const correctness = await getLatestCorrectnessMap(userId, uniqueWrongIds)
+  const stillMissedIds = uniqueWrongIds.filter(id => correctness.get(id) === false)
+
+  if (!stillMissedIds.length) return []
+
+  // questions has no lesson_id/sub_lesson_id of its own — only notes does
+  // (same table getNotesByLesson/getNotesBySubLesson query), so scope has
+  // to be resolved via each question's note_id.
+  const { data: missedQuestions, error: qErr } = await supabase
+    .from('questions')
+    .select('id, question_text, explanation, note_id')
+    .in('id', stillMissedIds)
+  if (qErr) throw qErr
+
+  const missedNoteIds = [...new Set((missedQuestions ?? []).map(q => q.note_id).filter(Boolean))]
+  const { data: notesForMissed, error: notesErr } = missedNoteIds.length
+    ? await supabase.from('notes').select('id, lesson_id, sub_lesson_id').in('id', missedNoteIds)
+    : { data: [] as any[], error: null }
+  if (notesErr) throw notesErr
+
+  const noteScope = new Map<string, string>() // note_id -> lesson_id ?? sub_lesson_id
+  for (const n of notesForMissed ?? []) {
+    const scopeId = n.lesson_id ?? n.sub_lesson_id
+    if (scopeId) noteScope.set(n.id, scopeId)
+  }
+
+  const cards: ReviewCard[] = []
+  for (const q of missedQuestions ?? []) {
+    const scopeId = q.note_id ? noteScope.get(q.note_id) : undefined
+    if (!scopeId) continue
+    const isTopic = lessonInfo.has(scopeId)
+    const info = isTopic ? lessonInfo.get(scopeId) : subLessonInfo.get(scopeId)
+    if (!info) continue
+
+    cards.push({
+      id: q.id,
+      questionText: q.question_text,
+      explanation: q.explanation,
+      scopeType: isTopic ? 'topic' : 'subtopic',
+      scopeId,
+      topicTitle: info.title,
+      courseTitle: info.courseTitle,
+      courseIcon: info.courseIcon,
+      courseColor: info.courseColor,
+    })
+  }
+
+  return cards
 }

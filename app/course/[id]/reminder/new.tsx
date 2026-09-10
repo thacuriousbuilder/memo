@@ -117,7 +117,7 @@ export default function NewReminderScreen() {
     if (mode === 'auto') {
       const hasProgress = await autoReminderHasProgress(reminderId, autoQuestionLevel)
       return hasProgress
-        ? `This plan is at Level ${autoQuestionLevel ?? 5}. Deleting it will lose this progress permanently.`
+        ? `This plan has grown to ${autoQuestionLevel ?? 5} questions per session. Deleting it will lose this progress permanently.`
         : null
     }
     return scopeItems.length > 0

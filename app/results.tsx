@@ -5,10 +5,12 @@ import {
   StyleSheet, LayoutAnimation, Platform, UIManager
 } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useState }  from 'react'
+import { useState, useEffect }  from 'react'
 import Svg, { Circle } from 'react-native-svg'
 import { Ionicons }  from '@expo/vector-icons'
 import { Colors, Spacing, Radius, Typography, CardBase } from '@/constants/theme'
+import { useSession } from '@/hooks/useSession'
+import { hasBlurtedToday } from '@/hooks/useStudyOverview'
 
 if (Platform.OS === 'android') {
   UIManager.setLayoutAnimationEnabledExperimental?.(true)
@@ -169,6 +171,8 @@ export default function ResultsScreen() {
     source?:  string
     returnTo?: string
     reminderId?: string
+    fromBlurtOverall?:  string
+    fromBlurtPointers?: string
   }>()
 
   const correct   = parseInt(params.correct  ?? '0')
@@ -194,6 +198,55 @@ export default function ResultsScreen() {
 
   const isFromRecent = params.source === 'recent'
 
+  // Connection card — this quiz was launched via "Quiz this topic" from a
+  // weak/partial blurt (app/blurt/results.tsx). Shows what the blurt
+  // struggled with next to how this quiz went, regardless of pass/fail —
+  // the point is closing the loop with a before/after, not just gating on
+  // success like the Blurt CTA below does.
+  const fromBlurtPointers: string[] = (() => {
+    try {
+      return JSON.parse(params.fromBlurtPointers ?? '[]')
+    } catch {
+      return []
+    }
+  })()
+  const showBlurtConnection = !!params.fromBlurtOverall
+
+  // "Confirm with Blurt" — only for a quiz scoped to a single topic/subtopic
+  // (mode 'lesson'/'sublesson'), passed, with enough questions behind it to
+  // mean something (>=5, the app's existing floor for "a real quiz"). Gated
+  // on hasBlurtedToday so a passed quiz doesn't re-trigger Blurt's LLM
+  // calls on a topic already exercised today — defaults to hidden while
+  // that check is in flight so the footer doesn't flash the CTA in and out.
+  const { user } = useSession()
+  const [canConfirmWithBlurt, setCanConfirmWithBlurt] = useState(false)
+  const scopeType: 'topic' | 'subtopic' = mode === 'sublesson' ? 'subtopic' : 'topic'
+  const eligibleForBlurtConfirm =
+    passed && (mode === 'lesson' || mode === 'sublesson') && total >= 5 && !!params.scopeId
+
+  useEffect(() => {
+    if (!eligibleForBlurtConfirm || !user) { setCanConfirmWithBlurt(false); return }
+    let cancelled = false
+    hasBlurtedToday(user.id, scopeType, params.scopeId)
+      .then(already => { if (!cancelled) setCanConfirmWithBlurt(!already) })
+      .catch(() => { if (!cancelled) setCanConfirmWithBlurt(false) })
+    return () => { cancelled = true }
+  }, [eligibleForBlurtConfirm, user?.id, scopeType, params.scopeId])
+
+  const handleConfirmWithBlurt = () => {
+    router.push({
+      pathname: '/blurt/[id]',
+      params: {
+        id:        params.scopeId ?? '',
+        scopeType,
+        scopeId:   params.scopeId ?? '',
+        title,
+        fromQuizScore: String(correct),
+        fromQuizTotal: String(total),
+      },
+    })
+  }
+
   const handleRetry = () => {
     router.replace({
       pathname: '/study/[id]',
@@ -203,6 +256,9 @@ export default function ResultsScreen() {
         title,
         reminderId: params.reminderId,
         returnTo:   params.returnTo,
+        fromBlurtOverall:  params.fromBlurtOverall ?? '',
+        fromBlurtPointers: params.fromBlurtPointers ?? '',
+        retryQuestionIds:  JSON.stringify(answers.map(a => a.questionId)),
       },
     })
   }
@@ -242,6 +298,24 @@ export default function ResultsScreen() {
         />
       </View>
 
+      {/* Connection card — following up on a weak/partial Blurt */}
+      {showBlurtConnection && (
+        <View style={styles.connectionCard}>
+          <Text style={styles.connectionLabel}>FOLLOWING UP ON BLURT</Text>
+          <Text style={styles.connectionLine}>
+            {fromBlurtPointers.length > 0
+              ? `You struggled with: ${fromBlurtPointers.join(', ')}`
+              : `Your last Blurt on this topic came back ${params.fromBlurtOverall === 'weak' ? 'Weak' : 'Partial'}`}
+          </Text>
+          <Text style={[styles.connectionLine, { color: passed ? Colors.success : Colors.error, fontWeight: Typography.semibold }]}>
+            This quiz: {correct}/{total} ({total > 0 ? Math.round((correct / total) * 100) : 0}%)
+          </Text>
+          <Text style={styles.connectionFraming}>
+            {passed ? 'Looks like that closed the gap.' : 'Still worth reviewing — keep at it.'}
+          </Text>
+        </View>
+      )}
+
       {/* Breakdown */}
       {answers.length > 0 && (
         <View style={styles.breakdown}>
@@ -253,15 +327,30 @@ export default function ResultsScreen() {
       )}
 
       {/* Action Button */}
-      <TouchableOpacity
-        style={styles.actionButton}
-        onPress={isFromRecent ? handleRetry : (passed ? handleDone : handleRetry)}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.actionButtonText}>
-          {isFromRecent ? 'Retake Quiz' : (passed ? 'Done' : 'Retry Quiz')}
-        </Text>
-      </TouchableOpacity>
+      {canConfirmWithBlurt ? (
+        <View style={{ gap: Spacing.sm }}>
+          <TouchableOpacity style={styles.actionButton} onPress={handleConfirmWithBlurt} activeOpacity={0.8}>
+            <Text style={styles.actionButtonText}>Confirm with Blurt</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={isFromRecent ? handleRetry : handleDone}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.secondaryButtonText}>{isFromRecent ? 'Retake Quiz' : 'Done'}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={isFromRecent ? handleRetry : (passed ? handleDone : handleRetry)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.actionButtonText}>
+            {isFromRecent ? 'Retake Quiz' : (passed ? 'Done' : 'Retry Quiz')}
+          </Text>
+        </TouchableOpacity>
+      )}
     </ScrollView>
   )
 }
@@ -328,6 +417,27 @@ const styles = StyleSheet.create({
     alignItems:     'center',
     justifyContent: 'center',
   },
+  // Connection card
+  connectionCard: {
+    ...CardBase,
+    gap: 4,
+  },
+  connectionLabel: {
+    fontSize:      Typography.xs,
+    fontWeight:    Typography.bold,
+    color:         Colors.textMuted,
+    letterSpacing: 1,
+  },
+  connectionLine: {
+    fontSize: Typography.sm,
+    color:    Colors.textPrimary,
+  },
+  connectionFraming: {
+    fontSize:  Typography.xs,
+    color:     Colors.textMuted,
+    marginTop: 2,
+  },
+
   ringFraction: {
     fontSize:   Typography.xxl,
     fontWeight: Typography.bold,
@@ -397,5 +507,18 @@ const styles = StyleSheet.create({
     fontSize:   Typography.base,
     fontWeight: Typography.semibold,
     color:      Colors.textInverse,
+  },
+  secondaryButton: {
+    backgroundColor: Colors.card,
+    borderWidth:     1,
+    borderColor:     Colors.border,
+    borderRadius:    Radius.md,
+    paddingVertical: Spacing.md,
+    alignItems:      'center',
+  },
+  secondaryButtonText: {
+    fontSize:   Typography.base,
+    fontWeight: Typography.semibold,
+    color:      Colors.primary,
   },
 })

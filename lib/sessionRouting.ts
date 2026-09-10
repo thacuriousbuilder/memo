@@ -91,6 +91,22 @@ export async function buildSessionRoute(item: SessionRouteParams): Promise<void>
       })
       return
     }
+    // Scoped to exactly one topic/subtopic — label it as such (mode:
+    // 'lesson'/'sublesson') instead of the generic 'custom', so the quiz
+    // results screen can offer a "Confirm with Blurt" CTA.
+    if (item.scopeItems.length === 1 && item.scopeItems[0].scopeType !== 'folder') {
+      const scope = item.scopeItems[0]
+      router.push({
+        pathname: '/study/[id]',
+        params: {
+          id: scope.scopeId, mode: scope.scopeType === 'subtopic' ? 'sublesson' : 'lesson', title: item.label,
+          presetCount: String(item.questionCount ?? 10),
+          reminderId: item.reminderId,
+          returnTo: 'home',
+        },
+      })
+      return
+    }
     const noteIds = await resolveReminderNoteIds(item.scopeItems)
     if (!noteIds.length) {
       Alert.alert('No materials', 'This reminder\'s materials couldn\'t be found.')

@@ -9,6 +9,7 @@ interface GradeResult {
   rating:          'strong' | 'partial' | 'weak'
   feedback:        string
   review_pointers: string[]
+  prompt?: { id: string; prompt_text: string; topic: string }
 }
 
 const RATING_META = {
@@ -32,6 +33,8 @@ export default function BlurtResultsScreen() {
     results:    string
     scopeType?: 'topic' | 'subtopic'
     scopeId?:   string
+    fromQuizScore?: string
+    fromQuizTotal?: string
   }>()
   const results: GradeResult[] = JSON.parse(params.results ?? '[]')
 
@@ -49,12 +52,41 @@ export default function BlurtResultsScreen() {
         scopeType: params.scopeType,
         scopeId:   params.scopeId,
         title:     params.title,
+        fromQuizScore: params.fromQuizScore ?? '',
+        fromQuizTotal: params.fromQuizTotal ?? '',
+        retryPrompts: JSON.stringify(results.map(r => r.prompt).filter(Boolean)),
+      },
+    })
+  }
+
+  const handleQuizThisTopic = () => {
+    if (!params.scopeType || !params.scopeId) return
+    router.push({
+      pathname: '/study/[id]',
+      params: {
+        id:    params.scopeId,
+        mode:  params.scopeType === 'topic' ? 'lesson' : 'sublesson',
+        title: params.title,
+        fromBlurtOverall:  overall,
+        fromBlurtPointers: JSON.stringify(allPointers.slice(0, 3)),
       },
     })
   }
 
   const overall = getOverallRating(results)
   const meta = RATING_META[overall]
+  const hasScope = !!params.scopeType && !!params.scopeId
+  const showQuizCta = overall !== 'strong' && hasScope
+
+  // Connection card — this session was launched via "Confirm with Blurt"
+  // from a passed quiz (app/results.tsx). Follows the "quiz confirms
+  // recognition, blurt confirms recall" framing established for the CTA
+  // loop: a 'strong' blurt here backs up the quiz pass, anything less
+  // reveals a gap the quiz didn't catch.
+  const fromQuizPct = params.fromQuizScore && params.fromQuizTotal && Number(params.fromQuizTotal) > 0
+    ? Math.round((Number(params.fromQuizScore) / Number(params.fromQuizTotal)) * 100)
+    : null
+  const showQuizConnection = fromQuizPct !== null
 
   const strongCount  = results.filter(r => r.rating === 'strong').length
   const partialCount = results.filter(r => r.rating === 'partial').length
@@ -72,6 +104,23 @@ export default function BlurtResultsScreen() {
           <Text style={[styles.overallLabel, { color: meta.color }]}>{meta.label}</Text>
           <Text style={styles.subtitle}>{params.title}</Text>
         </View>
+
+        {showQuizConnection && (
+          <View style={styles.connectionCard}>
+            <Text style={styles.sectionLabel}>FOLLOWING UP ON QUIZ</Text>
+            <Text style={styles.connectionLine}>
+              You passed with {params.fromQuizScore}/{params.fromQuizTotal} ({fromQuizPct}%)
+            </Text>
+            <Text style={[styles.connectionLine, { color: meta.color, fontWeight: Typography.semibold }]}>
+              This Blurt: {meta.label}
+            </Text>
+            <Text style={styles.connectionFraming}>
+              {overall === 'strong'
+                ? 'Confirmed — you can explain it, not just recognize it.'
+                : 'Worth noting — explaining it aloud revealed some gaps the quiz didn\'t catch.'}
+            </Text>
+          </View>
+        )}
 
         <View style={styles.breakdownRow}>
           <View style={styles.breakdownItem}>
@@ -116,14 +165,32 @@ export default function BlurtResultsScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        {params.scopeType && params.scopeId && (
-          <TouchableOpacity style={styles.retakeButton} onPress={handleRetake} activeOpacity={0.8}>
-            <Text style={styles.retakeButtonText}>Retake</Text>
-          </TouchableOpacity>
+        {showQuizCta ? (
+          <>
+            <TouchableOpacity style={styles.doneButton} onPress={handleQuizThisTopic} activeOpacity={0.8}>
+              <Text style={styles.doneButtonText}>Quiz this topic</Text>
+            </TouchableOpacity>
+            {hasScope && (
+              <TouchableOpacity style={styles.retakeButton} onPress={handleRetake} activeOpacity={0.8}>
+                <Text style={styles.retakeButtonText}>Retake</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.doneTextButton} onPress={handleDone} activeOpacity={0.8}>
+              <Text style={styles.doneTextButtonText}>Done</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            {hasScope && (
+              <TouchableOpacity style={styles.retakeButton} onPress={handleRetake} activeOpacity={0.8}>
+                <Text style={styles.retakeButtonText}>Retake</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.doneButton} onPress={handleDone} activeOpacity={0.8}>
+              <Text style={styles.doneButtonText}>Done</Text>
+            </TouchableOpacity>
+          </>
         )}
-        <TouchableOpacity style={styles.doneButton} onPress={handleDone} activeOpacity={0.8}>
-          <Text style={styles.doneButtonText}>Done</Text>
-        </TouchableOpacity>
       </View>
     </View>
   )
@@ -139,6 +206,9 @@ const styles = StyleSheet.create({
   },
   overallLabel: { fontSize: Typography.xl, fontWeight: Typography.bold },
   subtitle: { fontSize: Typography.sm, color: Colors.textSecondary },
+  connectionCard: { ...CardBase, gap: 4 },
+  connectionLine: { fontSize: Typography.sm, color: Colors.textPrimary },
+  connectionFraming: { fontSize: Typography.xs, color: Colors.textMuted, marginTop: 2 },
   breakdownRow: { flexDirection: 'row', justifyContent: 'space-around', ...CardBase, paddingVertical: Spacing.md },
   breakdownItem: { alignItems: 'center', gap: 2 },
   breakdownCount: { fontSize: Typography.xl, fontWeight: Typography.bold },
@@ -164,4 +234,6 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md, paddingVertical: Spacing.md, alignItems: 'center',
   },
   retakeButtonText: { fontSize: Typography.base, fontWeight: Typography.semibold, color: Colors.primary },
+  doneTextButton: { paddingVertical: Spacing.sm, alignItems: 'center' },
+  doneTextButtonText: { fontSize: Typography.sm, fontWeight: Typography.medium, color: Colors.textSecondary },
 })

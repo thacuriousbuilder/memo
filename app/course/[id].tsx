@@ -167,6 +167,24 @@ export default function CourseDetailScreen() {
   const handleSelectQuiz = () => {
     if (!course) return
     const hasSelection = selectedIds.size > 0
+
+    // A selection that exactly matches one topic/subtopic's notes gets
+    // labeled as such (mode: 'lesson'/'sublesson') instead of the generic
+    // 'custom' — same scope resolution the Blurt button already uses below,
+    // so the quiz results screen can offer a "Confirm with Blurt" CTA.
+    const exactScope = hasSelection ? resolveExactTopicSelection(selectedIds, course) : null
+    if (exactScope) {
+      router.push({
+        pathname: '/study/[id]',
+        params: {
+          id:    exactScope.scopeId,
+          mode:  exactScope.scopeType === 'topic' ? 'lesson' : 'sublesson',
+          title: exactScope.title,
+        },
+      })
+      return
+    }
+
     router.push({
       pathname: '/study/[id]',
       params: {
@@ -343,7 +361,7 @@ export default function CourseDetailScreen() {
                 {isAuto ? (
                   <Text style={styles.masteryText}>
                     Smart{reminder.planEndDate ? ` · ends ${parseLocalDate(reminder.planEndDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
-                    {reminder.autoQuestionLevel ? ` · Level ${reminder.autoQuestionLevel}` : ''}
+                    {reminder.autoQuestionLevel ? ` · ${reminder.autoQuestionLevel} questions/session` : ''}
                   </Text>
                 ) : mastery && mastery.totalUnits > 0 && (
                   fullyMastered ? (

@@ -100,7 +100,16 @@ export async function fetchQuestions(params: {
   count:    number
   userId:   string
   noteIds?: string[]
+  questionIds?: string[]
 }): Promise<QuizQuestion[]> {
+  // Retry with the exact same set — bypasses the mode-based note resolution
+  // and random selection below entirely. `mode` is intentionally left
+  // unused here (not overloaded into its own 'retry' value) so it still
+  // carries the original scope through to the caller unaffected.
+  if (params.questionIds?.length) {
+    return getQuestionsByIds(params.questionIds)
+  }
+
   let noteIds: string[] = []
 
   switch (params.mode) {
@@ -323,6 +332,45 @@ async function getQuestionsForNotes(
       (a: any, b: any) => a.option_index - b.option_index
     ),
   }))
+}
+
+// ─────────────────────────────────────────
+// RETRY WITH THE EXACT SAME QUESTIONS — no shuffle, no missed-question
+// bias, just the given ids in their original order.
+// ─────────────────────────────────────────
+async function getQuestionsByIds(questionIds: string[]): Promise<QuizQuestion[]> {
+  const { data, error } = await supabase
+    .from('questions')
+    .select(`
+      id,
+      question_text,
+      correct_option_index,
+      explanation,
+      topic,
+      difficulty,
+      question_type,
+      source_quote,
+      answer_options (
+        option_index,
+        option_text
+      )
+    `)
+    .in('id', questionIds)
+
+  if (error) throw error
+
+  const byId = new Map((data ?? []).map((q: any) => [q.id, q]))
+  // Preserve the original attempt's order, and silently drop any question
+  // deleted since (rather than erroring the whole retry).
+  return questionIds
+    .map(id => byId.get(id))
+    .filter((q): q is NonNullable<typeof q> => !!q)
+    .map(q => ({
+      ...q,
+      answer_options: (q.answer_options ?? []).sort(
+        (a: any, b: any) => a.option_index - b.option_index
+      ),
+    }))
 }
 
 // ─────────────────────────────────────────

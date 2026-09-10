@@ -32,13 +32,26 @@ import {
     rating:          'strong' | 'partial' | 'weak'
     feedback:        string
     review_pointers: string[]
+    prompt?:         BlurtPrompt
   }
-  
+
   function formatDuration(ms: number): string {
     const totalSec = Math.floor(ms / 1000)
     const m = Math.floor(totalSec / 60)
     const s = totalSec % 60
     return `${m}:${s.toString().padStart(2, '0')}`
+  }
+
+  // Retake with the exact same prompts — parsed once from the route param;
+  // an empty/missing/corrupt value falls back to the normal setup flow.
+  function parseRetryPrompts(raw?: string): BlurtPrompt[] {
+    if (!raw) return []
+    try {
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
   }
   
   const RATING_META = {
@@ -199,7 +212,7 @@ import {
           input_method: inputMethod,
         })
         setResult(graded)
-        setAllResults(prev => [...prev, graded])
+        setAllResults(prev => [...prev, { ...graded, prompt: current }])
 
         // Best-effort — the grade already succeeded and counts regardless;
         // this only links it to the Auto/Manual plan that launched it.
@@ -395,11 +408,15 @@ import {
       scopeId:   string
       title:     string
       reminderId?: string
+      fromQuizScore?: string
+      fromQuizTotal?: string
+      retryPrompts?: string
     }>()
     const { user } = useSession()
-  
-    const [step,    setStep]    = useState<BlurtStep>('setup')
-    const [prompts, setPrompts] = useState<BlurtPrompt[]>([])
+
+    const retryPrompts = parseRetryPrompts(params.retryPrompts)
+    const [step,    setStep]    = useState<BlurtStep>(retryPrompts.length ? 'session' : 'setup')
+    const [prompts, setPrompts] = useState<BlurtPrompt[]>(retryPrompts)
 
     // Covers the on-screen close button, iOS swipe-back, and Android
     // hardware back with a single confirmation — none of them can silently
@@ -480,6 +497,8 @@ import {
               results: JSON.stringify(results),
               scopeType: params.scopeType,
               scopeId: params.scopeId,
+              fromQuizScore: params.fromQuizScore ?? '',
+              fromQuizTotal: params.fromQuizTotal ?? '',
             },
           })
         }}
